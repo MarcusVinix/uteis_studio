@@ -124,9 +124,14 @@ export const ChurchPostGenerator: React.FC<ChurchPostGeneratorProps> = ({
   const [preacherZoom, setPreacherZoom] = useState(100);
   const [preacherOffsetY, setPreacherOffsetY] = useState(0);
 
+  const [showLogo, setShowLogo] = useState(true);
+  const [logoScale, setLogoScale] = useState(100);
   const [showLocalPastors, setShowLocalPastors] = useState(true);
+  const [localPastorsZoom, setLocalPastorsZoom] = useState(100);
   const [showPresidentPastors, setShowPresidentPastors] = useState(true);
+  const [presidentPastorsZoom, setPresidentPastorsZoom] = useState(100);
   const [showCircleLeader, setShowCircleLeader] = useState(template.defaultShowCircleLeader);
+  const [circleLeaderZoom, setCircleLeaderZoom] = useState(100);
   const [showFoodBadge, setShowFoodBadge] = useState(template.defaultShowFoodBadge);
   const [foodBadgeText, setFoodBadgeText] = useState('Trazer 1kg\nde Alimento');
 
@@ -203,9 +208,14 @@ export const ChurchPostGenerator: React.FC<ChurchPostGeneratorProps> = ({
         preacherPhotoUrl,
         preacherZoom,
         preacherOffsetY,
+        showLogo,
+        logoScale,
         showLocalPastors,
+        localPastorsZoom,
         showPresidentPastors,
+        presidentPastorsZoom,
         showCircleLeader,
+        circleLeaderZoom,
         showFoodBadge,
         foodBadgeText,
         accentColor,
@@ -230,9 +240,14 @@ export const ChurchPostGenerator: React.FC<ChurchPostGeneratorProps> = ({
     preacherPhotoUrl,
     preacherZoom,
     preacherOffsetY,
+    showLogo,
+    logoScale,
     showLocalPastors,
+    localPastorsZoom,
     showPresidentPastors,
+    presidentPastorsZoom,
     showCircleLeader,
+    circleLeaderZoom,
     showFoodBadge,
     foodBadgeText,
     accentColor,
@@ -594,47 +609,107 @@ export const ChurchPostGenerator: React.FC<ChurchPostGeneratorProps> = ({
 
             <hr className="border-slate-100 dark:border-slate-800" />
 
-            {/* Quick Elements Toggles */}
-            <div className="space-y-2">
-              <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-                4. Elementos no Post
-              </p>
-              <div className="grid grid-cols-2 gap-2">
+            {/* Quick Elements Toggles & Size Controls */}
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                  4. Exibir & Ajustar Tamanhos
+                </p>
+                {(showLocalPastors || showPresidentPastors || showCircleLeader) && (
+                  <button
+                    onClick={() => {
+                      setShowLocalPastors(false);
+                      setShowPresidentPastors(false);
+                      setShowCircleLeader(false);
+                    }}
+                    className="text-[11px] font-semibold text-violet-600 dark:text-violet-400 hover:underline"
+                  >
+                    Ocultar pastores/dirigente
+                  </button>
+                )}
+              </div>
+
+              <div className="space-y-2">
                 {[
+                  {
+                    label: 'Logo da Igreja',
+                    checked: showLogo,
+                    onChange: setShowLogo,
+                    zoom: logoScale,
+                    onZoom: setLogoScale,
+                    min: 60,
+                    max: 180,
+                  },
                   {
                     label: 'Prs. Locais',
                     checked: showLocalPastors,
                     onChange: setShowLocalPastors,
+                    zoom: localPastorsZoom,
+                    onZoom: setLocalPastorsZoom,
+                    min: 50,
+                    max: 160,
                   },
                   {
                     label: 'Prs. Presidentes',
                     checked: showPresidentPastors,
                     onChange: setShowPresidentPastors,
+                    zoom: presidentPastorsZoom,
+                    onZoom: setPresidentPastorsZoom,
+                    min: 50,
+                    max: 160,
                   },
                   {
                     label: 'Dirigente Círc. Oração',
                     checked: showCircleLeader,
                     onChange: setShowCircleLeader,
-                  },
-                  {
-                    label: 'Selo 1kg Alimento',
-                    checked: showFoodBadge,
-                    onChange: setShowFoodBadge,
+                    zoom: circleLeaderZoom,
+                    onZoom: setCircleLeaderZoom,
+                    min: 50,
+                    max: 160,
                   },
                 ].map((opt) => (
-                  <label
+                  <div
                     key={opt.label}
-                    className="flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 dark:border-slate-700/80 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300"
+                    className="rounded-xl border border-slate-200 dark:border-slate-700/80 px-3 py-2 space-y-1.5"
                   >
-                    <input
-                      type="checkbox"
-                      checked={opt.checked}
-                      onChange={(e) => opt.onChange(e.target.checked)}
-                      className="accent-violet-600 rounded"
-                    />
-                    {opt.label}
-                  </label>
+                    <div className="flex items-center justify-between">
+                      <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-slate-700 dark:text-slate-300">
+                        <input
+                          type="checkbox"
+                          checked={opt.checked}
+                          onChange={(e) => opt.onChange(e.target.checked)}
+                          className="accent-violet-600 rounded"
+                        />
+                        {opt.label}
+                      </label>
+                      {opt.checked && (
+                        <span className="text-[11px] font-bold text-violet-600 dark:text-violet-400">
+                          {opt.zoom}%
+                        </span>
+                      )}
+                    </div>
+                    {opt.checked && (
+                      <input
+                        type="range"
+                        min={opt.min}
+                        max={opt.max}
+                        value={opt.zoom}
+                        onChange={(e) => opt.onZoom(Number(e.target.value))}
+                        className="w-full accent-violet-600 cursor-pointer"
+                      />
+                    )}
+                  </div>
                 ))}
+
+                <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 dark:border-slate-700/80 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={showFoodBadge}
+                    onChange={(e) => setShowFoodBadge(e.target.checked)}
+                    className="accent-violet-600 rounded"
+                  />
+                  Selo 1kg Alimento
+                </label>
               </div>
               {showFoodBadge && (
                 <input

@@ -21,11 +21,16 @@ export interface ChurchPostState {
   preacherRole: string;
   preacherName: string;
   preacherPhotoUrl: string | null;
-  preacherZoom: number; // 70..150
+  preacherZoom: number; // 60..160
   preacherOffsetY: number; // -120..120
+  showLogo: boolean;
+  logoScale: number; // 60..180
   showLocalPastors: boolean;
+  localPastorsZoom: number; // 50..160
   showPresidentPastors: boolean;
+  presidentPastorsZoom: number; // 50..160
   showCircleLeader: boolean;
+  circleLeaderZoom: number; // 50..160
   showFoodBadge: boolean;
   foodBadgeText: string;
   accentColor: string;
@@ -408,9 +413,9 @@ export async function renderChurchPost(
   ctx.restore();
 
   // 3. Church Logo (top-right corner, circular badge)
-  const logoImg = await getCachedImage(profile.logoDataUrl);
+  const logoImg = state.showLogo ? await getCachedImage(profile.logoDataUrl) : null;
   if (logoImg) {
-    const logoSize = 128;
+    const logoSize = Math.round(128 * (state.logoScale / 100));
     const lx = W - logoSize - 44;
     const ly = 36 * scaleY;
     ctx.save();
@@ -446,13 +451,30 @@ export async function renderChurchPost(
 
   // Draw side portraits first (behind center preacher for depth!)
   if (localImg) {
-    drawPortraitWithBottomFade(ctx, localImg, W * 0.19, portraitBaseY, 370 * scaleY, 330);
+    const z = state.localPastorsZoom / 100;
+    drawPortraitWithBottomFade(ctx, localImg, W * 0.19, portraitBaseY, 370 * scaleY * z, 330 * z);
   }
   if (presidentImg) {
-    drawPortraitWithBottomFade(ctx, presidentImg, W * 0.81, portraitBaseY, 370 * scaleY, 330);
+    const z = state.presidentPastorsZoom / 100;
+    drawPortraitWithBottomFade(
+      ctx,
+      presidentImg,
+      W * 0.81,
+      portraitBaseY,
+      370 * scaleY * z,
+      330 * z
+    );
   }
   if (circleImg) {
-    drawPortraitWithBottomFade(ctx, circleImg, W * 0.36, portraitBaseY - 15, 360 * scaleY, 270);
+    const z = state.circleLeaderZoom / 100;
+    drawPortraitWithBottomFade(
+      ctx,
+      circleImg,
+      W * 0.36,
+      portraitBaseY - 15,
+      360 * scaleY * z,
+      270 * z
+    );
   }
 
   // Center preacher portrait (prominent!)

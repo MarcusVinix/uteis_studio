@@ -10,105 +10,142 @@ export interface RemoveBgProgress {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const cachedPipelines: Record<string, { model: any; processor: any }> = {};
 
-async function runTransformersModel(
+/**
+ * Normalizes any uploaded image (RGBA PNG, grayscale, CMYK, huge 48MP phone photo)
+ * into a clean 3-channel RGB canvas capped at `maxDim` so ONNX models never crash
+ * on channel mismatches or GPU/WASM out-of-memory.
+ */
+async function createNormalizedInputDataUrl(
+  origImg: HTMLImageElement,
+  maxDim = 1600
+): Promise<string> {
+  let w = origImg.naturalWidth;
+  let h = origImg.naturalHeight;
+  if (w > maxDim || h > maxDim) {
+    if (w >= h) {
+      h = Math.max(1, Math.round((h * maxDim) / w));
+      w = maxDim;
+    } else {
+      w = Math.max(1, Math.round((w * maxDim) / h));
+      h = maxDim;
+    }
+  }
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  const ctx = c.getContext('2d');
+  if (!ctx) throw new Error('Contexto canvas indisponível.');
+  // Fill opaque background first so transparent PNGs become clean 3-channel RGB
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, w, h);
+  ctx.drawImage(origImg, 0, 0, w, h);
+  return c.toDataURL('image/jpeg', 0.96);
+}
+
+async function loadTransformersEngine(
   engine: 'bria' | 'portrait',
-  imageUrl: string,
+  device: 'webgpu' | 'wasm',
   onProgress?: (p: RemoveBgProgress) => void
-): Promise<ImageData> {
-  const { AutoModel, AutoProcessor, RawImage, env } = await import('@huggingface/transformers');
+) {
+  const cacheKey = `${engine}:${device}`;
+  if (cachedPipelines[cacheKey]) return cachedPipelines[cacheKey];
+
+  const { AutoModel, AutoProcessor, env } = await import('@huggingface/transformers');
   env.allowLocalModels = false;
 
   const modelId = engine === 'bria' ? 'briaai/RMBG-1.4' : 'Xenova/modnet';
 
-  if (!cachedPipelines[engine]) {
-    onProgress?.({
-      percent: 8,
-      message:
-        engine === 'bria'
-          ? 'Baixando IA Ultra Precisão (RMBG-1.4)...'
-          : 'Baixando IA Especialista em Pessoas (MODNet)...',
-    });
-
-    const progressCallback = (info: { status?: string; progress?: number }) => {
-      if (info.status === 'progress' && typeof info.progress === 'number') {
-        const pct = Math.min(82, Math.max(10, Math.round(10 + info.progress * 0.72)));
-        onProgress?.({
-          percent: pct,
-          message:
-            engine === 'bria'
-              ? 'Baixando IA Ultra Precisão (salvo em cache após a 1ª vez)...'
-              : 'Baixando IA de Retrato (salvo em cache após a 1ª vez)...',
-        });
-      }
-    };
-
-    const hasWebGPU = typeof navigator !== 'undefined' && 'gpu' in navigator;
-
-    const loadModelWithFallback = async () => {
-      const commonOpts =
-        engine === 'bria'
-          ? {
-              config: { model_type: 'custom' as const },
-              progress_callback: progressCallback,
-            }
-          : {
-              dtype: 'fp32' as const,
-              progress_callback: progressCallback,
-            };
-
-      if (hasWebGPU) {
-        try {
-          return await AutoModel.from_pretrained(modelId, {
-            ...commonOpts,
-            device: 'webgpu',
-          } as Parameters<typeof AutoModel.from_pretrained>[1]);
-        } catch {
-          // Fall back to WASM if WebGPU is unavailable or fails for this model
-        }
-      }
-
-      return await AutoModel.from_pretrained(modelId, {
-        ...commonOpts,
-        device: 'wasm',
-      } as Parameters<typeof AutoModel.from_pretrained>[1]);
-    };
-
-    const processorPromise =
+  onProgress?.({
+    percent: 8,
+    message:
       engine === 'bria'
-        ? AutoProcessor.from_pretrained(modelId, {
-            config: {
-              do_normalize: true,
-              do_pad: false,
-              do_rescale: true,
-              do_resize: true,
-              image_mean: [0.5, 0.5, 0.5],
-              feature_extractor_type: 'ImageFeatureExtractor',
-              image_std: [1, 1, 1],
-              resample: 2,
-              rescale_factor: 0.00392156862745098,
-              size: { width: 1024, height: 1024 },
-            },
-          })
-        : AutoProcessor.from_pretrained(modelId);
+        ? 'Baixando IA Ultra Precisão (RMBG-1.4)...'
+        : 'Baixando IA Especialista em Pessoas (MODNet)...',
+  });
 
-    const [model, processor] = await Promise.all([loadModelWithFallback(), processorPromise]);
-    cachedPipelines[engine] = { model, processor };
-  }
+  const progressCallback = (info: { status?: string; progress?: number }) => {
+    if (info.status === 'progress' && typeof info.progress === 'number') {
+      const pct = Math.min(82, Math.max(10, Math.round(10 + info.progress * 0.72)));
+      onProgress?.({
+        percent: pct,
+        message:
+          engine === 'bria'
+            ? 'Baixando IA Ultra Precisão (salvo em cache após a 1ª vez)...'
+            : 'Baixando IA de Retrato (salvo em cache após a 1ª vez)...',
+      });
+    }
+  };
 
-  const { model, processor } = cachedPipelines[engine];
+  const modelOpts =
+    engine === 'bria'
+      ? {
+          config: { model_type: 'custom' as const },
+          device,
+          progress_callback: progressCallback,
+        }
+      : {
+          dtype: 'fp32' as const,
+          device,
+          progress_callback: progressCallback,
+        };
+
+  const processorPromise =
+    engine === 'bria'
+      ? AutoProcessor.from_pretrained(modelId, {
+          config: {
+            do_normalize: true,
+            do_pad: false,
+            do_rescale: true,
+            do_resize: true,
+            image_mean: [0.5, 0.5, 0.5],
+            feature_extractor_type: 'ImageFeatureExtractor',
+            image_std: [1, 1, 1],
+            resample: 2,
+            rescale_factor: 0.00392156862745098,
+            size: { width: 1024, height: 1024 },
+          },
+        })
+      : AutoProcessor.from_pretrained(modelId);
+
+  const [model, processor] = await Promise.all([
+    AutoModel.from_pretrained(
+      modelId,
+      modelOpts as Parameters<typeof AutoModel.from_pretrained>[1]
+    ),
+    processorPromise,
+  ]);
+
+  const entry = { model, processor };
+  cachedPipelines[cacheKey] = entry;
+  return entry;
+}
+
+async function runTransformersModelOnce(
+  engine: 'bria' | 'portrait',
+  device: 'webgpu' | 'wasm',
+  origImg: HTMLImageElement,
+  normalizedUrl: string,
+  onProgress?: (p: RemoveBgProgress) => void
+): Promise<ImageData> {
+  const { RawImage } = await import('@huggingface/transformers');
+  const { model, processor } = await loadTransformersEngine(engine, device, onProgress);
 
   onProgress?.({ percent: 86, message: 'Analisando contornos em alta definição...' });
-  const rawImg = await RawImage.fromURL(imageUrl);
+  const rawImg = (await RawImage.fromURL(normalizedUrl)).rgb();
   const { pixel_values } = await processor(rawImg);
 
   onProgress?.({ percent: 92, message: 'Recortando o fundo com precisão...' });
-  const { output } = await model({ input: pixel_values });
+  const result = await model({ input: pixel_values });
+  const outTensor = result.output ?? Object.values(result)[0];
+  if (!outTensor) throw new Error('Saída da IA vazia.');
 
-  const maskTensor = output[0].mul(255).to('uint8');
-  const mask = await RawImage.fromTensor(maskTensor).resize(rawImg.width, rawImg.height);
+  const maskTensor = outTensor[0].mul(255).to('uint8');
+  const mask = await RawImage.fromTensor(maskTensor).resize(
+    origImg.naturalWidth,
+    origImg.naturalHeight
+  );
 
   // Composite mask alpha channel onto original full-res image
-  const origImg = await loadImage(imageUrl);
   const canvas = document.createElement('canvas');
   canvas.width = origImg.naturalWidth;
   canvas.height = origImg.naturalHeight;
@@ -120,8 +157,9 @@ async function runTransformersModel(
   const pixels = imgData.data;
   const maskData = mask.data;
   const maskChannels = mask.channels;
+  const totalPixels = canvas.width * canvas.height;
 
-  for (let i = 0; i < canvas.width * canvas.height; i++) {
+  for (let i = 0; i < totalPixels; i++) {
     pixels[i * 4 + 3] = maskData[i * maskChannels];
   }
 
@@ -173,5 +211,31 @@ export async function removeImageBackground(
   if (engine === 'isnet') {
     return runImglyModel(file, onProgress);
   }
-  return runTransformersModel(engine, imageUrl, onProgress);
+
+  const origImg = await loadImage(imageUrl);
+  const normalizedUrl = await createNormalizedInputDataUrl(origImg, 1600);
+
+  // Try WASM directly first? Actually WebGPU is faster when supported,
+  // but if WebGPU fails during load OR inference, fall back cleanly to WASM,
+  // and if WASM also fails (e.g. network blocked to Hugging Face), fall back to IS-Net.
+  const hasWebGPU = typeof navigator !== 'undefined' && 'gpu' in navigator;
+
+  if (hasWebGPU) {
+    try {
+      return await runTransformersModelOnce(engine, 'webgpu', origImg, normalizedUrl, onProgress);
+    } catch (webgpuErr) {
+      console.warn(`WebGPU falhou para ${engine}, tentando WASM...`, webgpuErr);
+    }
+  }
+
+  try {
+    return await runTransformersModelOnce(engine, 'wasm', origImg, normalizedUrl, onProgress);
+  } catch (wasmErr) {
+    console.warn(`WASM falhou para ${engine}, usando fallback IS-Net...`, wasmErr);
+    onProgress?.({
+      percent: 45,
+      message: 'Alternando automaticamente para motor reserva...',
+    });
+    return await runImglyModel(file, onProgress);
+  }
 }
