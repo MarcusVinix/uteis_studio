@@ -68,8 +68,8 @@ export const DropZone: React.FC<DropZoneProps> = ({
       onDrop={handleDrop}
       className={`group relative cursor-pointer rounded-2xl border-2 border-dashed transition-all duration-200 ${
         isDragging
-          ? 'border-violet-500 bg-violet-50/80 scale-[1.01]'
-          : 'border-slate-300 bg-white hover:border-violet-400 hover:bg-violet-50/30'
+          ? 'border-violet-500 bg-violet-50/80 dark:bg-violet-500/10 scale-[1.01]'
+          : 'border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900/70 hover:border-violet-400 dark:hover:border-violet-500 hover:bg-violet-50/30 dark:hover:bg-violet-500/5'
       } ${compact ? 'p-6' : 'p-12 sm:p-16'}`}
     >
       <input
@@ -84,8 +84,8 @@ export const DropZone: React.FC<DropZoneProps> = ({
         <div
           className={`mb-4 flex items-center justify-center rounded-2xl transition-transform duration-200 group-hover:scale-105 ${
             isDragging
-              ? 'bg-violet-600 text-white shadow-lg shadow-violet-200'
-              : 'bg-gradient-to-br from-violet-100 to-indigo-100 text-violet-600'
+              ? 'bg-violet-600 text-white shadow-lg shadow-violet-200 dark:shadow-violet-950'
+              : 'bg-gradient-to-br from-violet-100 to-indigo-100 dark:from-violet-500/20 dark:to-indigo-500/20 text-violet-600 dark:text-violet-400'
           } ${compact ? 'h-12 w-12' : 'h-16 w-16'}`}
         >
           {isDragging ? (
@@ -94,10 +94,10 @@ export const DropZone: React.FC<DropZoneProps> = ({
             <Upload className={compact ? 'h-6 w-6' : 'h-8 w-8'} />
           )}
         </div>
-        <p className={`font-semibold text-slate-800 ${compact ? 'text-sm' : 'text-lg'}`}>
+        <p className={`font-semibold text-slate-800 dark:text-slate-100 ${compact ? 'text-sm' : 'text-lg'}`}>
           {title}
         </p>
-        <p className={`mt-1 text-slate-500 ${compact ? 'text-xs' : 'text-sm'}`}>
+        <p className={`mt-1 text-slate-500 dark:text-slate-400 ${compact ? 'text-xs' : 'text-sm'}`}>
           {subtitle}
         </p>
         {!compact && (

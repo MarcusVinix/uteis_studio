@@ -10,6 +10,10 @@ import {
   SlidersHorizontal,
   Eye,
   Image as ImageIcon,
+  Eraser,
+  Paintbrush,
+  Undo2,
+  RefreshCw,
 } from 'lucide-react';
 import { DropZone } from '../components/DropZone';
 import {
@@ -25,6 +29,8 @@ interface BackgroundRemoverProps {
   onClearInitialFile?: () => void;
   onSendToTool: (tool: 'crop' | 'compress', file: File) => void;
 }
+
+type AIModel = 'isnet' | 'isnet_fp16' | 'isnet_quint8';
 
 type BgOption =
   | { type: 'transparent'; label: string }
@@ -80,6 +86,12 @@ const GRADIENTS: BgOption[] = [
   },
 ];
 
+const MODEL_OPTIONS: { id: AIModel; label: string; hint: string }[] = [
+  { id: 'isnet', label: 'Alta Precisão', hint: 'Melhor recorte (FP32)' },
+  { id: 'isnet_fp16', label: 'Equilibrado', hint: 'Mais leve (FP16)' },
+  { id: 'isnet_quint8', label: 'Rápido', hint: 'Menor download' },
+];
+
 export const BackgroundRemover: React.FC<BackgroundRemoverProps> = ({
   initialFile,
   onClearInitialFile,
@@ -93,8 +105,24 @@ export const BackgroundRemover: React.FC<BackgroundRemoverProps> = ({
   const [statusText, setStatusText] = useState('');
   const [error, setError] = useState<string | null>(null);
 
-  const [viewMode, setViewMode] = useState<'result' | 'compare' | 'original'>('result');
+  // Precision & AI settings
+  const [aiModel, setAiModel] = useState<AIModel>('isnet');
+  const [edgeCleanup, setEdgeCleanup] = useState(25); // 0..85 removes semi-transparent haze
+
+  // View & refine brush state
+  const [viewMode, setViewMode] = useState<'compare' | 'refine' | 'result' | 'original'>('compare');
   const [sliderPos, setSliderPos] = useState(50);
+  const [brushMode, setBrushMode] = useState<'erase' | 'restore'>('erase');
+  const [brushSize, setBrushSize] = useState(44); // in image pixels (relative)
+  const [brushSoftness, setBrushSoftness] = useState(40); // 0..100
+  const [historyCount, setHistoryCount] = useState(0);
+  const [cursorPos, setCursorPos] = useState<{ x: number; y: number; visible: boolean }>({
+    x: 0,
+    y: 0,
+    visible: false,
+  });
+
+  // Background & export
   const [bgOption, setBgOption] = useState<BgOption>({
     type: 'transparent',
     label: 'Transparente',
@@ -104,57 +132,161 @@ export const BackgroundRemover: React.FC<BackgroundRemoverProps> = ({
     'image/png'
   );
 
+  // Internal offscreen canvases for non-destructive edge cleanup & brush editing
+  const origCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const rawAiDataRef = useRef<ImageData | null>(null);
+  const editCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const displayCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const undoStackRef = useRef<ImageData[]>([]);
+  const isPaintingRef = useRef(false);
+  const lastPointRef = useRef<{ x: number; y: number } | null>(null);
+
   const compareRef = useRef<HTMLDivElement>(null);
   const isDraggingSlider = useRef(false);
 
-  const processFile = useCallback(async (file: File) => {
-    setSourceFile(file);
-    setError(null);
+  // Sync display canvas & resultUrl from editCanvas
+  const syncPreviewFromEditCanvas = useCallback(async () => {
+    const editCanvas = editCanvasRef.current;
+    if (!editCanvas) return;
+
+    if (displayCanvasRef.current) {
+      const disp = displayCanvasRef.current;
+      if (disp.width !== editCanvas.width || disp.height !== editCanvas.height) {
+        disp.width = editCanvas.width;
+        disp.height = editCanvas.height;
+      }
+      const dCtx = disp.getContext('2d');
+      if (dCtx) {
+        dCtx.clearRect(0, 0, disp.width, disp.height);
+        dCtx.drawImage(editCanvas, 0, 0);
+      }
+    }
+
+    const blob = await canvasToBlob(editCanvas, 'image/png');
+    const url = URL.createObjectURL(blob);
     setResultUrl((prev) => {
       if (prev) URL.revokeObjectURL(prev);
-      return null;
+      return url;
     });
-    setOriginalUrl((prev) => {
-      if (prev) URL.revokeObjectURL(prev);
-      return URL.createObjectURL(file);
-    });
-
-    setIsProcessing(true);
-    setProgress(5);
-    setStatusText('Carregando IA no navegador...');
-
-    try {
-      const { removeBackground } = await import('@imgly/background-removal');
-      const blob = await removeBackground(file, {
-        progress: (key: string, current: number, total: number) => {
-          if (total > 0) {
-            const pct = Math.min(99, Math.round((current / total) * 100));
-            setProgress(pct);
-          }
-          if (key.toLowerCase().includes('fetch')) {
-            setStatusText('Baixando modelo de IA (apenas na 1ª vez)...');
-          } else {
-            setStatusText('Removendo o fundo da imagem...');
-          }
-        },
-        output: {
-          format: 'image/png',
-        },
-      });
-      const url = URL.createObjectURL(blob);
-      setResultUrl(url);
-      setViewMode('compare');
-      setSliderPos(50);
-    } catch (err) {
-      console.error(err);
-      setError(
-        'Não foi possível remover o fundo desta imagem. Verifique sua conexão (necessária na 1ª vez para baixar o modelo de IA) ou tente outra imagem.'
-      );
-    } finally {
-      setIsProcessing(false);
-      setProgress(100);
-    }
   }, []);
+
+  // Apply alpha cleanup threshold to raw AI ImageData and write into editCanvas
+  const applyEdgeCleanupToCanvas = useCallback(
+    async (cleanupValue: number) => {
+      const raw = rawAiDataRef.current;
+      const editCanvas = editCanvasRef.current;
+      if (!raw || !editCanvas) return;
+
+      const out = new ImageData(new Uint8ClampedArray(raw.data), raw.width, raw.height);
+      const data = out.data;
+
+      if (cleanupValue > 0) {
+        // Low-alpha cutoff removes faint background haze/ghosts while keeping smooth edges
+        const lowCut = Math.round((cleanupValue / 100) * 140);
+        const highCut = Math.min(255, lowCut + 75);
+        const range = Math.max(1, highCut - lowCut);
+
+        for (let i = 3; i < data.length; i += 4) {
+          const a = data[i];
+          if (a <= lowCut) {
+            data[i] = 0;
+          } else if (a < highCut) {
+            data[i] = Math.round(((a - lowCut) / range) * 255);
+          }
+        }
+      }
+
+      const ctx = editCanvas.getContext('2d');
+      if (!ctx) return;
+      ctx.clearRect(0, 0, editCanvas.width, editCanvas.height);
+      ctx.putImageData(out, 0, 0);
+
+      undoStackRef.current = [];
+      setHistoryCount(0);
+      await syncPreviewFromEditCanvas();
+    },
+    [syncPreviewFromEditCanvas]
+  );
+
+  const processFile = useCallback(
+    async (file: File, modelToUse: AIModel = aiModel, cleanupVal: number = edgeCleanup) => {
+      setSourceFile(file);
+      setError(null);
+      setResultUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return null;
+      });
+      const origObjectUrl = URL.createObjectURL(file);
+      setOriginalUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return origObjectUrl;
+      });
+
+      setIsProcessing(true);
+      setProgress(5);
+      setStatusText('Carregando IA de alta precisão...');
+
+      try {
+        const [{ removeBackground }, origImg] = await Promise.all([
+          import('@imgly/background-removal'),
+          loadImage(origObjectUrl),
+        ]);
+
+        // Store original image in offscreen canvas for the Restore brush
+        const origCanvas = document.createElement('canvas');
+        origCanvas.width = origImg.naturalWidth;
+        origCanvas.height = origImg.naturalHeight;
+        const origCtx = origCanvas.getContext('2d');
+        origCtx?.drawImage(origImg, 0, 0);
+        origCanvasRef.current = origCanvas;
+
+        const blob = await removeBackground(file, {
+          model: modelToUse,
+          progress: (key: string, current: number, total: number) => {
+            if (total > 0) {
+              const pct = Math.min(99, Math.round((current / total) * 100));
+              setProgress(pct);
+            }
+            if (key.toLowerCase().includes('fetch')) {
+              setStatusText('Baixando modelo de IA (salvo em cache após a 1ª vez)...');
+            } else {
+              setStatusText('Analisando e removendo o fundo...');
+            }
+          },
+          output: {
+            format: 'image/png',
+          },
+        });
+
+        const rawUrl = URL.createObjectURL(blob);
+        const aiImg = await loadImage(rawUrl);
+        URL.revokeObjectURL(rawUrl);
+
+        const editCanvas = document.createElement('canvas');
+        editCanvas.width = aiImg.naturalWidth;
+        editCanvas.height = aiImg.naturalHeight;
+        const eCtx = editCanvas.getContext('2d', { willReadFrequently: true });
+        if (eCtx) {
+          eCtx.drawImage(aiImg, 0, 0);
+          rawAiDataRef.current = eCtx.getImageData(0, 0, editCanvas.width, editCanvas.height);
+        }
+        editCanvasRef.current = editCanvas;
+
+        await applyEdgeCleanupToCanvas(cleanupVal);
+        setViewMode('compare');
+        setSliderPos(50);
+      } catch (err) {
+        console.error(err);
+        setError(
+          'Não foi possível remover o fundo desta imagem. Verifique sua conexão (necessária na 1ª vez para baixar o modelo de IA) ou tente o modelo Equilibrado.'
+        );
+      } finally {
+        setIsProcessing(false);
+        setProgress(100);
+      }
+    },
+    [aiModel, edgeCleanup, applyEdgeCleanupToCanvas]
+  );
 
   useEffect(() => {
     if (initialFile) {
@@ -162,6 +294,177 @@ export const BackgroundRemover: React.FC<BackgroundRemoverProps> = ({
       onClearInitialFile?.();
     }
   }, [initialFile, onClearInitialFile, processFile]);
+
+  // Draw editCanvas onto displayCanvas whenever switching to 'refine'
+  useEffect(() => {
+    if (viewMode === 'refine' && editCanvasRef.current && displayCanvasRef.current) {
+      const src = editCanvasRef.current;
+      const disp = displayCanvasRef.current;
+      disp.width = src.width;
+      disp.height = src.height;
+      const ctx = disp.getContext('2d');
+      ctx?.clearRect(0, 0, disp.width, disp.height);
+      ctx?.drawImage(src, 0, 0);
+    }
+  }, [viewMode, resultUrl]);
+
+  const handleUndo = useCallback(async () => {
+    const editCanvas = editCanvasRef.current;
+    if (!editCanvas || undoStackRef.current.length === 0) return;
+    const prevState = undoStackRef.current.pop()!;
+    const ctx = editCanvas.getContext('2d');
+    if (ctx) {
+      ctx.clearRect(0, 0, editCanvas.width, editCanvas.height);
+      ctx.putImageData(prevState, 0, 0);
+    }
+    setHistoryCount(undoStackRef.current.length);
+    await syncPreviewFromEditCanvas();
+  }, [syncPreviewFromEditCanvas]);
+
+  // Ctrl+Z shortcut for brush refine
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && viewMode === 'refine') {
+        e.preventDefault();
+        handleUndo();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [viewMode, handleUndo]);
+
+  // Paint brush dab at image coordinates (x, y)
+  const paintDab = (ctx: CanvasRenderingContext2D, x: number, y: number, radius: number) => {
+    const innerRatio = Math.max(0.05, 1 - brushSoftness / 100);
+
+    if (brushMode === 'erase') {
+      ctx.save();
+      ctx.globalCompositeOperation = 'destination-out';
+      const grad = ctx.createRadialGradient(x, y, radius * innerRatio, x, y, radius);
+      grad.addColorStop(0, 'rgba(0,0,0,1)');
+      grad.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(x, y, radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    } else if (origCanvasRef.current) {
+      // Restore pixels from origCanvas with soft radial brush
+      const d = Math.ceil(radius * 2);
+      const stamp = document.createElement('canvas');
+      stamp.width = d;
+      stamp.height = d;
+      const sCtx = stamp.getContext('2d');
+      if (!sCtx) return;
+
+      sCtx.drawImage(
+        origCanvasRef.current,
+        x - radius,
+        y - radius,
+        d,
+        d,
+        0,
+        0,
+        d,
+        d
+      );
+      sCtx.globalCompositeOperation = 'destination-in';
+      const grad = sCtx.createRadialGradient(
+        radius,
+        radius,
+        radius * innerRatio,
+        radius,
+        radius,
+        radius
+      );
+      grad.addColorStop(0, 'rgba(0,0,0,1)');
+      grad.addColorStop(1, 'rgba(0,0,0,0)');
+      sCtx.fillStyle = grad;
+      sCtx.fillRect(0, 0, d, d);
+
+      ctx.save();
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.drawImage(stamp, x - radius, y - radius);
+      ctx.restore();
+    }
+  };
+
+  const getCanvasPoint = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const disp = displayCanvasRef.current;
+    if (!disp) return null;
+    const rect = disp.getBoundingClientRect();
+    const scaleX = disp.width / rect.width;
+    const scaleY = disp.height / rect.height;
+    return {
+      x: (e.clientX - rect.left) * scaleX,
+      y: (e.clientY - rect.top) * scaleY,
+      displayX: e.clientX - rect.left,
+      displayY: e.clientY - rect.top,
+      scale: scaleX,
+    };
+  };
+
+  const paintLine = (from: { x: number; y: number }, to: { x: number; y: number }, scale: number) => {
+    const editCanvas = editCanvasRef.current;
+    const disp = displayCanvasRef.current;
+    if (!editCanvas || !disp) return;
+    const eCtx = editCanvas.getContext('2d');
+    const dCtx = disp.getContext('2d');
+    if (!eCtx || !dCtx) return;
+
+    // brushSize is in screen-relative px; convert to image px so visual cursor matches exact stroke
+    const radius = Math.max(2, (brushSize / 2) * scale);
+    const dist = Math.hypot(to.x - from.x, to.y - from.y);
+    const step = Math.max(1, radius * 0.25);
+    const steps = Math.max(1, Math.ceil(dist / step));
+
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const px = from.x + (to.x - from.x) * t;
+      const py = from.y + (to.y - from.y) * t;
+      paintDab(eCtx, px, py, radius);
+    }
+
+    dCtx.clearRect(0, 0, disp.width, disp.height);
+    dCtx.drawImage(editCanvas, 0, 0);
+  };
+
+  const handleCanvasPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const pt = getCanvasPoint(e);
+    const editCanvas = editCanvasRef.current;
+    if (!pt || !editCanvas) return;
+
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const eCtx = editCanvas.getContext('2d', { willReadFrequently: true });
+    if (eCtx) {
+      const snapshot = eCtx.getImageData(0, 0, editCanvas.width, editCanvas.height);
+      undoStackRef.current.push(snapshot);
+      if (undoStackRef.current.length > 25) undoStackRef.current.shift();
+      setHistoryCount(undoStackRef.current.length);
+    }
+
+    isPaintingRef.current = true;
+    lastPointRef.current = { x: pt.x, y: pt.y };
+    paintLine({ x: pt.x, y: pt.y }, { x: pt.x, y: pt.y }, pt.scale);
+  };
+
+  const handleCanvasPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const pt = getCanvasPoint(e);
+    if (!pt) return;
+    setCursorPos({ x: pt.displayX, y: pt.displayY, visible: true });
+
+    if (isPaintingRef.current && lastPointRef.current) {
+      paintLine(lastPointRef.current, { x: pt.x, y: pt.y }, pt.scale);
+      lastPointRef.current = { x: pt.x, y: pt.y };
+    }
+  };
+
+  const handleCanvasPointerUp = async () => {
+    if (!isPaintingRef.current) return;
+    isPaintingRef.current = false;
+    lastPointRef.current = null;
+    await syncPreviewFromEditCanvas();
+  };
 
   const handleReset = () => {
     if (originalUrl) URL.revokeObjectURL(originalUrl);
@@ -171,15 +474,18 @@ export const BackgroundRemover: React.FC<BackgroundRemoverProps> = ({
     setResultUrl(null);
     setError(null);
     setIsProcessing(false);
+    undoStackRef.current = [];
+    setHistoryCount(0);
     setBgOption({ type: 'transparent', label: 'Transparente' });
   };
 
   const composeFinalBlob = async (format: string): Promise<Blob | null> => {
-    if (!resultUrl) return null;
-    const img = await loadImage(resultUrl);
+    const editCanvas = editCanvasRef.current;
+    if (!editCanvas) return null;
+
     const canvas = document.createElement('canvas');
-    canvas.width = img.naturalWidth;
-    canvas.height = img.naturalHeight;
+    canvas.width = editCanvas.width;
+    canvas.height = editCanvas.height;
     const ctx = canvas.getContext('2d');
     if (!ctx) return null;
 
@@ -197,7 +503,7 @@ export const BackgroundRemover: React.FC<BackgroundRemoverProps> = ({
       ctx.fillRect(0, 0, canvas.width, canvas.height);
     }
 
-    ctx.drawImage(img, 0, 0);
+    ctx.drawImage(editCanvas, 0, 0);
     return canvasToBlob(canvas, format, 0.95);
   };
 
@@ -236,29 +542,31 @@ export const BackgroundRemover: React.FC<BackgroundRemoverProps> = ({
         <DropZone
           onFilesSelected={(files) => processFile(files[0])}
           title="Solte uma imagem para remover o fundo com IA"
-          subtitle="PNG, JPG ou WebP • 100% gratuito e privado (roda direto no seu navegador)"
+          subtitle="PNG, JPG ou WebP • Modelo de Alta Precisão + Pincel Apagar/Restaurar"
         />
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           {[
             {
+              title: 'IA de Alta Precisão',
+              desc: 'Usa o modelo completo (FP32) e limpeza automática de resíduos semi-transparentes.',
+            },
+            {
+              title: 'Pincel Apagar / Restaurar',
+              desc: 'Remova objetos extras do fundo ou restaure detalhes com 1 clique, igual ao Canva.',
+            },
+            {
               title: 'Privacidade total',
-              desc: 'Suas imagens nunca são enviadas para servidores externos.',
-            },
-            {
-              title: 'Fundo personalizável',
-              desc: 'Exporte com fundo transparente, cor sólida ou gradiente.',
-            },
-            {
-              title: 'Pronto para editar',
-              desc: 'Envie o resultado direto para recortar ou comprimir em 1 clique.',
+              desc: 'Suas imagens são processadas 100% no navegador, sem envio para servidores.',
             },
           ].map((item) => (
             <div
               key={item.title}
-              className="rounded-xl border border-slate-200/80 bg-white p-4 shadow-xs"
+              className="rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900/70 p-4 shadow-xs"
             >
-              <p className="text-sm font-semibold text-slate-800">{item.title}</p>
-              <p className="mt-1 text-xs text-slate-500">{item.desc}</p>
+              <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+                {item.title}
+              </p>
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{item.desc}</p>
             </div>
           ))}
         </div>
@@ -270,10 +578,11 @@ export const BackgroundRemover: React.FC<BackgroundRemoverProps> = ({
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
       {/* Canvas / Preview area */}
       <div className="lg:col-span-8 flex flex-col gap-4">
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-xs">
-          <div className="flex items-center gap-1 rounded-xl bg-slate-100 p-1">
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 py-3 shadow-xs">
+          <div className="flex flex-wrap items-center gap-1 rounded-xl bg-slate-100 dark:bg-slate-800 p-1">
             {[
               { id: 'compare', label: 'Comparar', icon: SlidersHorizontal },
+              { id: 'refine', label: 'Refinar (Pincel)', icon: Eraser },
               { id: 'result', label: 'Resultado', icon: Sparkles },
               { id: 'original', label: 'Original', icon: Eye },
             ].map((tab) => {
@@ -286,8 +595,8 @@ export const BackgroundRemover: React.FC<BackgroundRemoverProps> = ({
                   onClick={() => setViewMode(tab.id as typeof viewMode)}
                   className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
                     active
-                      ? 'bg-white text-violet-700 shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900 disabled:opacity-40'
+                      ? 'bg-white dark:bg-slate-700 text-violet-700 dark:text-violet-300 shadow-xs'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white disabled:opacity-40'
                   }`}
                 >
                   <Icon className="h-3.5 w-3.5" />
@@ -299,35 +608,106 @@ export const BackgroundRemover: React.FC<BackgroundRemoverProps> = ({
 
           <button
             onClick={handleReset}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 hover:text-slate-900"
+            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300 transition hover:bg-slate-50 dark:hover:bg-slate-800"
           >
             <RotateCcw className="h-3.5 w-3.5" />
             Nova imagem
           </button>
         </div>
 
-        <div className="relative flex min-h-[380px] sm:min-h-[460px] items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 p-4 shadow-xs">
+        {/* Refine Brush Toolbar (visible in refine mode) */}
+        {viewMode === 'refine' && resultUrl && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-violet-200 dark:border-violet-500/30 bg-violet-50/70 dark:bg-violet-950/30 px-4 py-3">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setBrushMode('erase')}
+                className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold transition ${
+                  brushMode === 'erase'
+                    ? 'bg-rose-600 text-white shadow-xs'
+                    : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700'
+                }`}
+              >
+                <Eraser className="h-3.5 w-3.5" />
+                Apagar fundo
+              </button>
+              <button
+                onClick={() => setBrushMode('restore')}
+                className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold transition ${
+                  brushMode === 'restore'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700'
+                }`}
+              >
+                <Paintbrush className="h-3.5 w-3.5" />
+                Restaurar
+              </button>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-4">
+              <label className="flex items-center gap-2 text-xs font-medium text-slate-700 dark:text-slate-300">
+                <span>Tamanho</span>
+                <input
+                  type="range"
+                  min={10}
+                  max={140}
+                  value={brushSize}
+                  onChange={(e) => setBrushSize(Number(e.target.value))}
+                  className="w-24 accent-violet-600 cursor-pointer"
+                />
+                <span className="w-8 text-[11px] font-bold text-violet-700 dark:text-violet-300">
+                  {brushSize}px
+                </span>
+              </label>
+
+              <label className="flex items-center gap-2 text-xs font-medium text-slate-700 dark:text-slate-300">
+                <span>Suavidade</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={90}
+                  value={brushSoftness}
+                  onChange={(e) => setBrushSoftness(Number(e.target.value))}
+                  className="w-20 accent-violet-600 cursor-pointer"
+                />
+              </label>
+
+              <button
+                disabled={historyCount === 0}
+                onClick={handleUndo}
+                title="Desfazer (Ctrl+Z)"
+                className="inline-flex items-center gap-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-40"
+              >
+                <Undo2 className="h-3.5 w-3.5" />
+                Desfazer
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div className="relative flex min-h-[400px] sm:min-h-[480px] items-center justify-center overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-900/90 p-4 shadow-xs">
           {isProcessing && (
-            <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-slate-900/60 backdrop-blur-xs text-white p-6 text-center">
-              <Loader2 className="h-10 w-10 animate-spin text-violet-300 mb-3" />
+            <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-slate-950/75 backdrop-blur-xs text-white p-6 text-center">
+              <Loader2 className="h-10 w-10 animate-spin text-violet-400 mb-3" />
               <p className="text-base font-semibold">{statusText}</p>
-              <div className="mt-4 h-2 w-64 max-w-full overflow-hidden rounded-full bg-white/20">
+              <div className="mt-4 h-2 w-64 max-w-full overflow-hidden rounded-full bg-white/15">
                 <div
-                  className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-violet-400 transition-all duration-300"
+                  className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-violet-500 transition-all duration-300"
                   style={{ width: `${Math.max(8, progress)}%` }}
                 />
               </div>
-              <p className="mt-2 text-xs text-slate-200">{progress}%</p>
+              <p className="mt-2 text-xs text-slate-300">{progress}%</p>
             </div>
           )}
 
           {error && (
-            <div className="z-20 max-w-md rounded-2xl border border-rose-200 bg-white p-6 text-center shadow-lg">
+            <div className="z-20 max-w-md rounded-2xl border border-rose-200 dark:border-rose-500/30 bg-white dark:bg-slate-900 p-6 text-center shadow-lg">
               <AlertCircle className="mx-auto h-10 w-10 text-rose-500 mb-2" />
-              <p className="text-sm font-semibold text-slate-800">Ops, algo deu errado</p>
-              <p className="mt-1 text-xs text-slate-600">{error}</p>
+              <p className="text-sm font-semibold text-slate-800 dark:text-white">
+                Ops, algo deu errado
+              </p>
+              <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">{error}</p>
               <button
-                onClick={() => processFile(sourceFile)}
+                onClick={() => processFile(sourceFile, aiModel, edgeCleanup)}
                 className="mt-4 rounded-xl bg-violet-600 px-4 py-2 text-xs font-semibold text-white hover:bg-violet-700"
               >
                 Tentar novamente
@@ -339,7 +719,7 @@ export const BackgroundRemover: React.FC<BackgroundRemoverProps> = ({
             <img
               src={originalUrl}
               alt="Original"
-              className="max-h-[440px] max-w-full rounded-xl object-contain shadow-sm"
+              className="max-h-[460px] max-w-full rounded-xl object-contain shadow-sm"
             />
           )}
 
@@ -353,8 +733,45 @@ export const BackgroundRemover: React.FC<BackgroundRemoverProps> = ({
               <img
                 src={resultUrl}
                 alt="Sem fundo"
-                className="max-h-[440px] max-w-full object-contain block"
+                className="max-h-[460px] max-w-full object-contain block"
               />
+            </div>
+          )}
+
+          {!error && resultUrl && viewMode === 'refine' && (
+            <div
+              className={`relative overflow-hidden rounded-xl shadow-sm ${
+                bgOption.type === 'transparent' ? 'checkerboard' : ''
+              }`}
+              style={getBgStyle()}
+            >
+              <canvas
+                ref={displayCanvasRef}
+                onPointerDown={handleCanvasPointerDown}
+                onPointerMove={handleCanvasPointerMove}
+                onPointerUp={handleCanvasPointerUp}
+                onPointerLeave={() => {
+                  setCursorPos((c) => ({ ...c, visible: false }));
+                  if (isPaintingRef.current) handleCanvasPointerUp();
+                }}
+                className="max-h-[460px] max-w-full block touch-none cursor-none"
+                style={{ width: 'auto', height: 'auto' }}
+              />
+              {cursorPos.visible && (
+                <div
+                  className={`pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 rounded-full border-2 shadow-sm ${
+                    brushMode === 'erase'
+                      ? 'border-rose-500 bg-rose-500/20'
+                      : 'border-emerald-400 bg-emerald-400/20'
+                  }`}
+                  style={{
+                    left: cursorPos.x,
+                    top: cursorPos.y,
+                    width: brushSize,
+                    height: brushSize,
+                  }}
+                />
+              )}
             </div>
           )}
 
@@ -377,14 +794,12 @@ export const BackgroundRemover: React.FC<BackgroundRemoverProps> = ({
               }`}
               style={getBgStyle()}
             >
-              {/* Result image (full underneath) */}
               <img
                 src={resultUrl}
                 alt="Resultado"
                 draggable={false}
-                className="max-h-[440px] max-w-full object-contain block pointer-events-none"
+                className="max-h-[460px] max-w-full object-contain block pointer-events-none"
               />
-              {/* Original image (clipped on the left) */}
               <div
                 className="absolute inset-0 overflow-hidden pointer-events-none"
                 style={{ clipPath: `inset(0 ${100 - sliderPos}% 0 0)` }}
@@ -397,7 +812,6 @@ export const BackgroundRemover: React.FC<BackgroundRemoverProps> = ({
                 />
               </div>
 
-              {/* Divider line */}
               <div
                 className="absolute top-0 bottom-0 w-0.5 bg-white shadow-[0_0_8px_rgba(0,0,0,0.5)] pointer-events-none"
                 style={{ left: `${sliderPos}%` }}
@@ -407,7 +821,7 @@ export const BackgroundRemover: React.FC<BackgroundRemoverProps> = ({
                 </div>
               </div>
 
-              <span className="pointer-events-none absolute top-3 left-3 rounded-lg bg-slate-900/70 px-2.5 py-1 text-[11px] font-semibold text-white">
+              <span className="pointer-events-none absolute top-3 left-3 rounded-lg bg-slate-900/75 px-2.5 py-1 text-[11px] font-semibold text-white">
                 Antes
               </span>
               <span className="pointer-events-none absolute top-3 right-3 rounded-lg bg-violet-600/90 px-2.5 py-1 text-[11px] font-semibold text-white">
@@ -420,20 +834,92 @@ export const BackgroundRemover: React.FC<BackgroundRemoverProps> = ({
 
       {/* Controls Sidebar */}
       <div className="lg:col-span-4 space-y-4">
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs space-y-5">
+        {/* Precision & Edge Cleanup Card */}
+        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-xs space-y-4">
           <div>
-            <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
-              <ImageIcon className="h-4 w-4 text-violet-600" />
+            <h3 className="text-sm font-bold text-slate-800 dark:text-white flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-violet-500" />
+              Precisão da IA
+            </h3>
+            <div className="mt-2.5 grid grid-cols-3 gap-1.5">
+              {MODEL_OPTIONS.map((m) => (
+                <button
+                  key={m.id}
+                  disabled={isProcessing}
+                  onClick={() => {
+                    setAiModel(m.id);
+                    if (sourceFile) processFile(sourceFile, m.id, edgeCleanup);
+                  }}
+                  title={m.hint}
+                  className={`rounded-xl border px-2 py-2 text-[11px] font-semibold transition ${
+                    aiModel === m.id
+                      ? 'border-violet-500 bg-violet-50 dark:bg-violet-500/15 text-violet-700 dark:text-violet-300'
+                      : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                Limpeza de resíduos / bordas
+              </span>
+              <span className="rounded-md bg-violet-50 dark:bg-violet-500/15 px-2 py-0.5 text-[11px] font-bold text-violet-700 dark:text-violet-300">
+                {edgeCleanup}%
+              </span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={85}
+              step={5}
+              disabled={!resultUrl || isProcessing}
+              value={edgeCleanup}
+              onChange={(e) => {
+                const val = Number(e.target.value);
+                setEdgeCleanup(val);
+                applyEdgeCleanupToCanvas(val);
+              }}
+              className="mt-1.5 w-full accent-violet-600 cursor-pointer disabled:opacity-40"
+            />
+            <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">
+              Remove névoas e halos semi-transparentes ao redor do recorte.
+            </p>
+          </div>
+
+          {resultUrl && (
+            <button
+              onClick={() => setViewMode(viewMode === 'refine' ? 'compare' : 'refine')}
+              className={`flex w-full items-center justify-center gap-2 rounded-xl border px-3 py-2 text-xs font-semibold transition ${
+                viewMode === 'refine'
+                  ? 'border-violet-500 bg-violet-600 text-white'
+                  : 'border-violet-200 dark:border-violet-500/30 bg-violet-50 dark:bg-violet-500/10 text-violet-700 dark:text-violet-300 hover:bg-violet-100 dark:hover:bg-violet-500/20'
+              }`}
+            >
+              <Eraser className="h-3.5 w-3.5" />
+              {viewMode === 'refine' ? 'Concluir retoque com pincel' : 'Retocar com Pincel (Apagar / Restaurar)'}
+            </button>
+          )}
+        </div>
+
+        {/* Background & Export Card */}
+        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-xs space-y-5">
+          <div>
+            <h3 className="text-sm font-bold text-slate-800 dark:text-white flex items-center gap-2">
+              <ImageIcon className="h-4 w-4 text-violet-500" />
               Plano de Fundo
             </h3>
-            <p className="mt-0.5 text-xs text-slate-500">
+            <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
               Escolha transparente ou substitua por uma cor ou gradiente.
             </p>
           </div>
 
-          {/* Transparent + Solid colors */}
           <div>
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
               Cores sólidas
             </p>
             <div className="flex flex-wrap items-center gap-2">
@@ -442,8 +928,8 @@ export const BackgroundRemover: React.FC<BackgroundRemoverProps> = ({
                 onClick={() => setBgOption({ type: 'transparent', label: 'Transparente' })}
                 className={`h-8 w-8 rounded-lg border checkerboard-sm transition ${
                   bgOption.type === 'transparent'
-                    ? 'ring-2 ring-violet-600 ring-offset-2 border-violet-600'
-                    : 'border-slate-300 hover:scale-105'
+                    ? 'ring-2 ring-violet-500 ring-offset-2 dark:ring-offset-slate-900 border-violet-500'
+                    : 'border-slate-300 dark:border-slate-700 hover:scale-105'
                 }`}
               />
               {SOLID_COLORS.map((c) => {
@@ -457,15 +943,15 @@ export const BackgroundRemover: React.FC<BackgroundRemoverProps> = ({
                     style={{ backgroundColor: c.value }}
                     className={`h-8 w-8 rounded-lg border transition ${
                       active
-                        ? 'ring-2 ring-violet-600 ring-offset-2 border-violet-600'
-                        : 'border-slate-300 hover:scale-105'
+                        ? 'ring-2 ring-violet-500 ring-offset-2 dark:ring-offset-slate-900 border-violet-500'
+                        : 'border-slate-300 dark:border-slate-700 hover:scale-105'
                     }`}
                   />
                 );
               })}
               <label
                 title="Cor personalizada"
-                className="relative flex h-8 w-8 cursor-pointer items-center justify-center overflow-hidden rounded-lg border border-slate-300 bg-gradient-to-tr from-rose-500 via-amber-400 to-cyan-500 hover:scale-105 transition"
+                className="relative flex h-8 w-8 cursor-pointer items-center justify-center overflow-hidden rounded-lg border border-slate-300 dark:border-slate-700 bg-gradient-to-tr from-rose-500 via-amber-400 to-cyan-500 hover:scale-105 transition"
               >
                 <input
                   type="color"
@@ -485,9 +971,8 @@ export const BackgroundRemover: React.FC<BackgroundRemoverProps> = ({
             </div>
           </div>
 
-          {/* Gradients */}
           <div>
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
               Gradientes
             </p>
             <div className="flex flex-wrap items-center gap-2">
@@ -502,8 +987,8 @@ export const BackgroundRemover: React.FC<BackgroundRemoverProps> = ({
                     style={{ backgroundImage: g.css }}
                     className={`h-8 w-11 rounded-lg border transition ${
                       active
-                        ? 'ring-2 ring-violet-600 ring-offset-2 border-violet-600'
-                        : 'border-slate-200 hover:scale-105'
+                        ? 'ring-2 ring-violet-500 ring-offset-2 dark:ring-offset-slate-900 border-violet-500'
+                        : 'border-slate-200 dark:border-slate-700 hover:scale-105'
                     }`}
                   />
                 );
@@ -511,11 +996,10 @@ export const BackgroundRemover: React.FC<BackgroundRemoverProps> = ({
             </div>
           </div>
 
-          <hr className="border-slate-100" />
+          <hr className="border-slate-100 dark:border-slate-800" />
 
-          {/* Export format */}
           <div>
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
               Formato de download
             </p>
             <div className="grid grid-cols-3 gap-2">
@@ -531,8 +1015,8 @@ export const BackgroundRemover: React.FC<BackgroundRemoverProps> = ({
                   onClick={() => setExportFormat(fmt.id)}
                   className={`rounded-xl border py-2 text-xs font-semibold transition ${
                     exportFormat === fmt.id
-                      ? 'border-violet-600 bg-violet-50 text-violet-700'
-                      : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                      ? 'border-violet-500 bg-violet-50 dark:bg-violet-500/15 text-violet-700 dark:text-violet-300'
+                      : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
                   }`}
                 >
                   {fmt.label}
@@ -540,7 +1024,7 @@ export const BackgroundRemover: React.FC<BackgroundRemoverProps> = ({
               ))}
             </div>
             {exportFormat === 'image/jpeg' && bgOption.type === 'transparent' && (
-              <p className="mt-1.5 text-[11px] text-amber-600">
+              <p className="mt-1.5 text-[11px] text-amber-600 dark:text-amber-400">
                 JPG não suporta transparência — o fundo será exportado em branco.
               </p>
             )}
@@ -549,7 +1033,7 @@ export const BackgroundRemover: React.FC<BackgroundRemoverProps> = ({
           <button
             disabled={!resultUrl || isProcessing}
             onClick={handleDownload}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 px-4 py-3 text-sm font-semibold text-white shadow-md shadow-violet-200 transition hover:from-violet-700 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 px-4 py-3 text-sm font-semibold text-white shadow-md shadow-violet-200 dark:shadow-violet-950/60 transition hover:from-violet-700 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Download className="h-4 w-4" />
             Baixar Imagem
@@ -557,25 +1041,34 @@ export const BackgroundRemover: React.FC<BackgroundRemoverProps> = ({
 
           {resultUrl && (
             <div className="pt-1 space-y-2">
-              <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
                 Continuar editando
               </p>
               <div className="grid grid-cols-2 gap-2">
                 <button
                   onClick={() => handleForwardTo('crop')}
-                  className="flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-violet-300 hover:bg-violet-50 hover:text-violet-700"
+                  className="flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 transition hover:border-violet-400 hover:text-violet-600 dark:hover:text-violet-300"
                 >
                   <Crop className="h-3.5 w-3.5" />
                   Recortar
                 </button>
                 <button
                   onClick={() => handleForwardTo('compress')}
-                  className="flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-violet-300 hover:bg-violet-50 hover:text-violet-700"
+                  className="flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 transition hover:border-violet-400 hover:text-violet-600 dark:hover:text-violet-300"
                 >
                   <Minimize2 className="h-3.5 w-3.5" />
                   Comprimir
                 </button>
               </div>
+              {historyCount > 0 && (
+                <button
+                  onClick={() => applyEdgeCleanupToCanvas(edgeCleanup)}
+                  className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-[11px] font-medium text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"
+                >
+                  <RefreshCw className="h-3 w-3" />
+                  Resetar retoques do pincel
+                </button>
+              )}
             </div>
           )}
         </div>

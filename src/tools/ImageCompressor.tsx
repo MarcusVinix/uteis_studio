@@ -34,7 +34,7 @@ export const ImageCompressor: React.FC<ImageCompressorProps> = ({
   const [items, setItems] = useState<CompressedItem[]>([]);
   const [format, setFormat] = useState<'image/webp' | 'image/jpeg' | 'image/png'>('image/webp');
   const [quality, setQuality] = useState(80);
-  const [maxDimension, setMaxDimension] = useState<number>(0); // 0 = original
+  const [maxDimension, setMaxDimension] = useState<number>(0);
 
   const compressSingle = useCallback(
     async (
@@ -124,7 +124,6 @@ export const ImageCompressor: React.FC<ImageCompressorProps> = ({
     }
   }, [initialFile, onClearInitialFile, addFiles]);
 
-  // Re-compress when settings change
   useEffect(() => {
     if (items.length === 0) return;
     const timer = setTimeout(async () => {
@@ -171,16 +170,17 @@ export const ImageCompressor: React.FC<ImageCompressorProps> = ({
   return (
     <div className="space-y-6">
       {/* Controls bar */}
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs">
+      <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-xs">
         <div className="flex items-center gap-2 mb-4">
-          <Sliders className="h-4 w-4 text-violet-600" />
-          <h3 className="text-sm font-bold text-slate-800">Configurações de compressão e conversão</h3>
+          <Sliders className="h-4 w-4 text-violet-500" />
+          <h3 className="text-sm font-bold text-slate-800 dark:text-white">
+            Configurações de compressão e conversão
+          </h3>
         </div>
 
         <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
-          {/* Format */}
           <div>
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
               Formato de saída
             </p>
             <div className="grid grid-cols-3 gap-2">
@@ -196,8 +196,8 @@ export const ImageCompressor: React.FC<ImageCompressorProps> = ({
                   onClick={() => setFormat(fmt.id)}
                   className={`rounded-xl border py-2 text-xs font-semibold transition ${
                     format === fmt.id
-                      ? 'border-violet-600 bg-violet-50 text-violet-700'
-                      : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                      ? 'border-violet-500 bg-violet-50 dark:bg-violet-500/15 text-violet-700 dark:text-violet-300'
+                      : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
                   }`}
                 >
                   {fmt.label}
@@ -206,13 +206,12 @@ export const ImageCompressor: React.FC<ImageCompressorProps> = ({
             </div>
           </div>
 
-          {/* Quality */}
           <div>
             <div className="mb-2 flex items-center justify-between">
-              <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+              <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
                 Qualidade
               </p>
-              <span className="rounded-md bg-violet-50 px-2 py-0.5 text-xs font-bold text-violet-700">
+              <span className="rounded-md bg-violet-50 dark:bg-violet-500/15 px-2 py-0.5 text-xs font-bold text-violet-700 dark:text-violet-300">
                 {format === 'image/png' ? 'Sem perda' : `${quality}%`}
               </span>
             </div>
@@ -226,21 +225,20 @@ export const ImageCompressor: React.FC<ImageCompressorProps> = ({
               onChange={(e) => setQuality(Number(e.target.value))}
               className="w-full accent-violet-600 disabled:opacity-40 cursor-pointer"
             />
-            <div className="mt-1 flex justify-between text-[11px] text-slate-400">
+            <div className="mt-1 flex justify-between text-[11px] text-slate-400 dark:text-slate-500">
               <span>Menor arquivo</span>
               <span>Maior qualidade</span>
             </div>
           </div>
 
-          {/* Max width/height */}
           <div>
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
               Dimensão máxima
             </p>
             <select
               value={maxDimension}
               onChange={(e) => setMaxDimension(Number(e.target.value))}
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 focus:border-violet-500 focus:outline-none"
+              className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 focus:border-violet-500 focus:outline-none"
             >
               <option value={0}>Manter tamanho original</option>
               <option value={1920}>Máx. 1920px (Full HD)</option>
@@ -251,7 +249,6 @@ export const ImageCompressor: React.FC<ImageCompressorProps> = ({
         </div>
       </div>
 
-      {/* DropZone */}
       <DropZone
         multiple
         compact={items.length > 0}
@@ -264,20 +261,19 @@ export const ImageCompressor: React.FC<ImageCompressorProps> = ({
         subtitle="Suporta envio em lote • Converta entre WebP, JPG e PNG instantaneamente"
       />
 
-      {/* Results list */}
       {items.length > 0 && (
         <div className="space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-xs">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 py-3 shadow-xs">
             <div className="flex items-center gap-3 text-sm">
               <CheckCircle2 className="h-5 w-5 text-emerald-500" />
-              <span className="font-semibold text-slate-800">
+              <span className="font-semibold text-slate-800 dark:text-white">
                 {items.length} {items.length === 1 ? 'imagem pronta' : 'imagens prontas'}
               </span>
-              <span className="text-xs text-slate-500">
+              <span className="text-xs text-slate-500 dark:text-slate-400">
                 {formatFileSize(totalOrig)} → {formatFileSize(totalOut)}
               </span>
               {totalSavedPct > 0 && (
-                <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-bold text-emerald-700">
+                <span className="rounded-full bg-emerald-100 dark:bg-emerald-500/15 px-2.5 py-0.5 text-xs font-bold text-emerald-700 dark:text-emerald-400">
                   -{totalSavedPct}%
                 </span>
               )}
@@ -286,7 +282,7 @@ export const ImageCompressor: React.FC<ImageCompressorProps> = ({
             <div className="flex items-center gap-2">
               <button
                 onClick={clearAll}
-                className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                className="rounded-xl border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800"
               >
                 Limpar lista
               </button>
@@ -307,35 +303,35 @@ export const ImageCompressor: React.FC<ImageCompressorProps> = ({
               return (
                 <div
                   key={item.id}
-                  className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-3.5 shadow-xs"
+                  className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3.5 shadow-xs"
                 >
                   <div className="flex items-center gap-3.5 min-w-0">
                     <img
                       src={item.previewUrl}
                       alt={item.file.name}
-                      className="h-14 w-14 shrink-0 rounded-xl border border-slate-200 object-cover checkerboard-sm"
+                      className="h-14 w-14 shrink-0 rounded-xl border border-slate-200 dark:border-slate-700 object-cover checkerboard-sm"
                     />
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-slate-800 max-w-[220px] sm:max-w-xs">
+                      <p className="truncate text-sm font-semibold text-slate-800 dark:text-white max-w-[220px] sm:max-w-xs">
                         {item.file.name}
                       </p>
-                      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
                         <span>{formatFileSize(item.file.size)}</span>
                         <ArrowRight className="h-3 w-3 text-slate-400" />
-                        <span className="font-semibold text-slate-800">
+                        <span className="font-semibold text-slate-800 dark:text-slate-100">
                           {formatFileSize(outSize)}
                         </span>
                         <span
                           className={`rounded-md px-1.5 py-0.5 text-[11px] font-bold ${
                             diffPct > 0
-                              ? 'bg-emerald-50 text-emerald-700'
-                              : 'bg-amber-50 text-amber-700'
+                              ? 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
+                              : 'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-400'
                           }`}
                         >
                           {diffPct > 0 ? `-${diffPct}%` : `+${Math.abs(diffPct)}%`}
                         </span>
                         {item.outW > 0 && (
-                          <span className="text-[11px] text-slate-400">
+                          <span className="text-[11px] text-slate-400 dark:text-slate-500">
                             • {item.outW}×{item.outH}px
                           </span>
                         )}
@@ -347,7 +343,7 @@ export const ImageCompressor: React.FC<ImageCompressorProps> = ({
                     <button
                       disabled={!item.outputBlob}
                       onClick={() => downloadItem(item)}
-                      className="inline-flex items-center gap-1.5 rounded-xl bg-slate-900 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-violet-600 disabled:opacity-50"
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-slate-900 dark:bg-violet-600 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-violet-600 dark:hover:bg-violet-500 disabled:opacity-50"
                     >
                       <Download className="h-3.5 w-3.5" />
                       Baixar {getExtensionFromMime(format).toUpperCase()}
@@ -355,7 +351,7 @@ export const ImageCompressor: React.FC<ImageCompressorProps> = ({
                     <button
                       onClick={() => removeItem(item.id)}
                       title="Remover"
-                      className="rounded-xl border border-slate-200 p-2 text-slate-400 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
+                      className="rounded-xl border border-slate-200 dark:border-slate-700 p-2 text-slate-400 transition hover:border-rose-200 dark:hover:border-rose-500/40 hover:bg-rose-50 dark:hover:bg-rose-500/10 hover:text-rose-600 dark:hover:text-rose-400"
                     >
                       <Trash2 className="h-4 w-4" />
                     </button>
