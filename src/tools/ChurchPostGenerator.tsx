@@ -11,6 +11,9 @@ import {
   Palette,
   LayoutTemplate,
   UserCircle2,
+  Move,
+  RotateCcw,
+  AlignCenterHorizontal,
 } from 'lucide-react';
 import {
   CHURCH_TEMPLATES,
@@ -25,7 +28,12 @@ import {
   type TextureStyle,
   type FrameStyle,
 } from '../utils/churchAssets';
-import { renderChurchPost } from '../utils/churchPostRenderer';
+import {
+  renderChurchPost,
+  type ElementBox,
+  type ElementTransformMap,
+  type PosterElementId,
+} from '../utils/churchPostRenderer';
 import { removeImageBackground } from '../utils/aiBackgroundRemover';
 import { canvasToBlob, downloadBlob } from '../utils/imageHelpers';
 
@@ -148,7 +156,26 @@ export const ChurchPostGenerator: React.FC<ChurchPostGeneratorProps> = ({
   const [exportFormat, setExportFormat] = useState<'image/png' | 'image/jpeg'>('image/png');
   const [savedNotice, setSavedNotice] = useState(false);
 
+  // Interactive Canva-style drag & resize state
+  const [transforms, setTransforms] = useState<ElementTransformMap>({});
+  const [boxes, setBoxes] = useState<ElementBox[]>([]);
+  const [selectedId, setSelectedId] = useState<PosterElementId | null>(null);
+  const [hoveredId, setHoveredId] = useState<PosterElementId | null>(null);
+  const [snapGuides, setSnapGuides] = useState<{ x: boolean; y: boolean }>({ x: false, y: false });
+
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const interactionRef = useRef<{
+    mode: 'drag' | 'resize';
+    id: PosterElementId;
+    startClientX: number;
+    startClientY: number;
+    startDx: number;
+    startDy: number;
+    startScale: number;
+    baseCenterX: number;
+    baseCenterY: number;
+    startBoxW: number;
+  } | null>(null);
 
   const currentFormat = POST_FORMATS.find((f) => f.id === formatId) ?? POST_FORMATS[0];
   const currentBg =
@@ -171,6 +198,8 @@ export const ChurchPostGenerator: React.FC<ChurchPostGeneratorProps> = ({
     setVerse(tpl.defaultVerse);
     setShowFoodBadge(tpl.defaultShowFoodBadge);
     setShowCircleLeader(tpl.defaultShowCircleLeader);
+    setTransforms({});
+    setSelectedId(null);
   };
 
   // Accept forwarded cutout image from BackgroundRemover
@@ -187,10 +216,10 @@ export const ChurchPostGenerator: React.FC<ChurchPostGeneratorProps> = ({
   }, [initialPreacherFile, onClearInitialFile]);
 
   // Live Canvas Render
-  const redraw = useCallback(() => {
+  const redraw = useCallback(async () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    renderChurchPost(
+    const nextBoxes = await renderChurchPost(
       canvas,
       {
         template,
@@ -222,9 +251,11 @@ export const ChurchPostGenerator: React.FC<ChurchPostGeneratorProps> = ({
         bgDim,
         texture,
         frame,
+        transforms,
       },
       profile
     );
+    setBoxes(nextBoxes);
   }, [
     template,
     currentBg,
@@ -254,13 +285,141 @@ export const ChurchPostGenerator: React.FC<ChurchPostGeneratorProps> = ({
     bgDim,
     texture,
     frame,
+    transforms,
     profile,
   ]);
 
   useEffect(() => {
-    const id = requestAnimationFrame(() => redraw());
+    const id = requestAnimationFrame(() => {
+      void redraw();
+    });
     return () => cancelAnimationFrame(id);
   }, [redraw]);
+
+  // Arrow keys to nudge selected element
+  useEffect(() => {
+    if (!selectedId) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      const step = e.shiftKey ? 18 : 4;
+      let ddx = 0;
+      let ddy = 0;
+      if (e.key === 'ArrowLeft') ddx = -step;
+      else if (e.key === 'ArrowRight') ddx = step;
+      else if (e.key === 'ArrowUp') ddy = -step;
+      else if (e.key === 'ArrowDown') ddy = step;
+      else if (e.key === 'Escape') {
+        setSelectedId(null);
+        return;
+      } else {
+        return;
+      }
+      e.preventDefault();
+      setTransforms((prev) => {
+        const cur = prev[selectedId] ?? { dx: 0, dy: 0, scale: 1 };
+        return { ...prev, [selectedId]: { ...cur, dx: cur.dx + ddx, dy: cur.dy + ddy } };
+      });
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [selectedId]);
+
+  const startElementInteraction = (
+    e: React.PointerEvent,
+    box: ElementBox,
+    mode: 'drag' | 'resize'
+  ) => {
+    e.stopPropagation();
+    e.preventDefault();
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    setSelectedId(box.id);
+    const cur = transforms[box.id] ?? { dx: 0, dy: 0, scale: 1 };
+    interactionRef.current = {
+      mode,
+      id: box.id,
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      startDx: cur.dx,
+      startDy: cur.dy,
+      startScale: cur.scale,
+      baseCenterX: box.centerX - cur.dx,
+      baseCenterY: box.centerY - cur.dy,
+      startBoxW: box.w,
+    };
+  };
+
+  const handleStagePointerMove = (e: React.PointerEvent) => {
+    const inter = interactionRef.current;
+    const canvas = canvasRef.current;
+    if (!inter || !canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return;
+
+    const ratioX = currentFormat.width / rect.width;
+    const ratioY = currentFormat.height / rect.height;
+    const deltaX = (e.clientX - inter.startClientX) * ratioX;
+    const deltaY = (e.clientY - inter.startClientY) * ratioY;
+
+    if (inter.mode === 'drag') {
+      let nextDx = Math.round(inter.startDx + deltaX);
+      let nextDy = Math.round(inter.startDy + deltaY);
+
+      const newCenterX = inter.baseCenterX + nextDx;
+      const newCenterY = inter.baseCenterY + nextDy;
+      const snapThreshold = 16;
+
+      let snappedX = false;
+      let snappedY = false;
+
+      if (Math.abs(newCenterX - currentFormat.width / 2) <= snapThreshold) {
+        nextDx = Math.round(currentFormat.width / 2 - inter.baseCenterX);
+        snappedX = true;
+      }
+      if (Math.abs(newCenterY - currentFormat.height / 2) <= snapThreshold) {
+        nextDy = Math.round(currentFormat.height / 2 - inter.baseCenterY);
+        snappedY = true;
+      }
+
+      setSnapGuides({ x: snappedX, y: snappedY });
+      setTransforms((prev) => ({
+        ...prev,
+        [inter.id]: { dx: nextDx, dy: nextDy, scale: inter.startScale },
+      }));
+    } else {
+      // Corner resize
+      const diag = (deltaX + deltaY) * 0.5;
+      const scaleFactor = Math.max(0.4, Math.min(2.2, inter.startScale + diag / Math.max(120, inter.startBoxW)));
+      setTransforms((prev) => ({
+        ...prev,
+        [inter.id]: {
+          dx: inter.startDx,
+          dy: inter.startDy,
+          scale: Math.round(scaleFactor * 100) / 100,
+        },
+      }));
+    }
+  };
+
+  const handleStagePointerUp = () => {
+    interactionRef.current = null;
+    setSnapGuides({ x: false, y: false });
+  };
+
+  const centerSelectedHorizontally = () => {
+    if (!selectedId) return;
+    const box = boxes.find((b) => b.id === selectedId);
+    if (!box) return;
+    const cur = transforms[selectedId] ?? { dx: 0, dy: 0, scale: 1 };
+    const baseCenterX = box.centerX - cur.dx;
+    setTransforms((prev) => ({
+      ...prev,
+      [selectedId]: { ...cur, dx: Math.round(currentFormat.width / 2 - baseCenterX) },
+    }));
+  };
+
+  const hasCustomTransforms = Object.keys(transforms).length > 0;
+  const selectedBox = boxes.find((b) => b.id === selectedId) ?? null;
 
   const handleDownload = async () => {
     const canvas = canvasRef.current;
@@ -355,11 +514,122 @@ export const ChurchPostGenerator: React.FC<ChurchPostGeneratorProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center justify-center rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-900/90 p-4 sm:p-6 shadow-xs">
-          <canvas
-            ref={canvasRef}
-            className="max-h-[680px] w-auto max-w-full rounded-xl shadow-2xl border border-black/10 dark:border-white/10"
-          />
+        <div
+          onClick={() => setSelectedId(null)}
+          className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-900/90 p-4 sm:p-6 shadow-xs"
+        >
+          {/* Interactive Canva-style status bar */}
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="flex w-full flex-wrap items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400"
+          >
+            <span className="inline-flex items-center gap-1.5">
+              <Move className="h-3.5 w-3.5 text-violet-500" />
+              {selectedBox ? (
+                <span>
+                  Selecionado:{' '}
+                  <strong className="text-slate-800 dark:text-white">{selectedBox.label}</strong>{' '}
+                  (arraste para mover ou puxe o canto para redimensionar)
+                </span>
+              ) : (
+                <span>Clique e arraste qualquer elemento no post para mover (estilo Canva)</span>
+              )}
+            </span>
+
+            <div className="flex items-center gap-1.5">
+              {selectedBox && (
+                <button
+                  onClick={centerSelectedHorizontally}
+                  className="inline-flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1 text-[11px] font-semibold text-slate-700 dark:text-slate-200 hover:border-violet-400"
+                >
+                  <AlignCenterHorizontal className="h-3 w-3" />
+                  Centralizar
+                </button>
+              )}
+              {hasCustomTransforms && (
+                <button
+                  onClick={() => {
+                    setTransforms({});
+                    setSelectedId(null);
+                  }}
+                  className="inline-flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1 text-[11px] font-semibold text-slate-600 dark:text-slate-300 hover:border-rose-400 hover:text-rose-500"
+                >
+                  <RotateCcw className="h-3 w-3" />
+                  Resetar posições
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Canvas + Interactive Hit-Box Overlay */}
+          <div
+            onPointerMove={handleStagePointerMove}
+            onPointerUp={handleStagePointerUp}
+            onPointerCancel={handleStagePointerUp}
+            className="relative inline-block select-none touch-none"
+          >
+            <canvas
+              ref={canvasRef}
+              className="max-h-[660px] w-auto max-w-full block rounded-xl shadow-2xl border border-black/10 dark:border-white/10"
+            />
+
+            {/* Snap-to-center guides */}
+            {snapGuides.x && (
+              <div className="pointer-events-none absolute top-0 bottom-0 left-1/2 w-0.5 -translate-x-1/2 border-l-2 border-dashed border-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.8)]" />
+            )}
+            {snapGuides.y && (
+              <div className="pointer-events-none absolute left-0 right-0 top-1/2 h-0.5 -translate-y-1/2 border-t-2 border-dashed border-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.8)]" />
+            )}
+
+            {/* Draggable / Resizable Element Boxes */}
+            <div className="absolute inset-0 overflow-hidden rounded-xl">
+              {boxes.map((box) => {
+                const isSelected = selectedId === box.id;
+                const isHovered = hoveredId === box.id;
+                const leftPct = (box.x / currentFormat.width) * 100;
+                const topPct = (box.y / currentFormat.height) * 100;
+                const widthPct = (box.w / currentFormat.width) * 100;
+                const heightPct = (box.h / currentFormat.height) * 100;
+
+                return (
+                  <div
+                    key={box.id}
+                    onPointerDown={(e) => startElementInteraction(e, box, 'drag')}
+                    onPointerEnter={() => setHoveredId(box.id)}
+                    onPointerLeave={() => setHoveredId((prev) => (prev === box.id ? null : prev))}
+                    onClick={(e) => e.stopPropagation()}
+                    style={{
+                      left: `${leftPct}%`,
+                      top: `${topPct}%`,
+                      width: `${widthPct}%`,
+                      height: `${heightPct}%`,
+                    }}
+                    className={`absolute cursor-move rounded-md transition-colors ${
+                      isSelected
+                        ? 'ring-2 ring-violet-500 bg-violet-500/10 z-20'
+                        : isHovered
+                          ? 'ring-1 ring-dashed ring-violet-400/90 bg-violet-500/5 z-10'
+                          : 'z-0'
+                    }`}
+                  >
+                    {(isSelected || isHovered) && (
+                      <span className="pointer-events-none absolute -top-5 left-0 whitespace-nowrap rounded bg-violet-600 px-1.5 py-0.5 text-[10px] font-bold text-white shadow">
+                        {box.label}
+                      </span>
+                    )}
+
+                    {isSelected && (
+                      <div
+                        title="Arraste para redimensionar"
+                        onPointerDown={(e) => startElementInteraction(e, box, 'resize')}
+                        className="absolute -bottom-2 -right-2 h-4 w-4 cursor-nwse-resize rounded-full border-2 border-white bg-violet-600 shadow-md"
+                      />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         </div>
       </div>
 
