@@ -5,6 +5,6 @@ import tailwindcss from '@tailwindcss/vite';
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   optimizeDeps: {
-    exclude: ['@imgly/background-removal'],
+    exclude: ['@imgly/background-removal', '@huggingface/transformers'],
   },
 });

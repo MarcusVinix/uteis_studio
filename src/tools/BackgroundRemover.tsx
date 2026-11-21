@@ -23,14 +23,13 @@ import {
   loadImage,
   canvasToBlob,
 } from '../utils/imageHelpers';
+import { removeImageBackground, type BgEngine } from '../utils/aiBackgroundRemover';
 
 interface BackgroundRemoverProps {
   initialFile?: File | null;
   onClearInitialFile?: () => void;
   onSendToTool: (tool: 'crop' | 'compress', file: File) => void;
 }
-
-type AIModel = 'isnet' | 'isnet_fp16' | 'isnet_quint8';
 
 type BgOption =
   | { type: 'transparent'; label: string }
@@ -86,10 +85,10 @@ const GRADIENTS: BgOption[] = [
   },
 ];
 
-const MODEL_OPTIONS: { id: AIModel; label: string; hint: string }[] = [
-  { id: 'isnet', label: 'Alta Precisão', hint: 'Melhor recorte (FP32)' },
-  { id: 'isnet_fp16', label: 'Equilibrado', hint: 'Mais leve (FP16)' },
-  { id: 'isnet_quint8', label: 'Rápido', hint: 'Menor download' },
+const MODEL_OPTIONS: { id: BgEngine; label: string; hint: string }[] = [
+  { id: 'bria', label: 'Ultra (RMBG)', hint: 'Estilo Canva — pessoas e objetos (BRIA RMBG-1.4)' },
+  { id: 'portrait', label: 'Pessoas', hint: 'Especialista em retratos — ignora objetos atrás (MODNet)' },
+  { id: 'isnet', label: 'Rápido', hint: 'Leve e rápido (IS-Net)' },
 ];
 
 export const BackgroundRemover: React.FC<BackgroundRemoverProps> = ({
@@ -106,8 +105,8 @@ export const BackgroundRemover: React.FC<BackgroundRemoverProps> = ({
   const [error, setError] = useState<string | null>(null);
 
   // Precision & AI settings
-  const [aiModel, setAiModel] = useState<AIModel>('isnet');
-  const [edgeCleanup, setEdgeCleanup] = useState(25); // 0..85 removes semi-transparent haze
+  const [aiModel, setAiModel] = useState<BgEngine>('bria');
+  const [edgeCleanup, setEdgeCleanup] = useState(15); // 0..85 removes semi-transparent haze
 
   // View & refine brush state
   const [viewMode, setViewMode] = useState<'compare' | 'refine' | 'result' | 'original'>('compare');
@@ -209,7 +208,7 @@ export const BackgroundRemover: React.FC<BackgroundRemoverProps> = ({
   );
 
   const processFile = useCallback(
-    async (file: File, modelToUse: AIModel = aiModel, cleanupVal: number = edgeCleanup) => {
+    async (file: File, modelToUse: BgEngine = aiModel, cleanupVal: number = edgeCleanup) => {
       setSourceFile(file);
       setError(null);
       setResultUrl((prev) => {
@@ -224,13 +223,10 @@ export const BackgroundRemover: React.FC<BackgroundRemoverProps> = ({
 
       setIsProcessing(true);
       setProgress(5);
-      setStatusText('Carregando IA de alta precisão...');
+      setStatusText('Preparando IA de alta precisão...');
 
       try {
-        const [{ removeBackground }, origImg] = await Promise.all([
-          import('@imgly/background-removal'),
-          loadImage(origObjectUrl),
-        ]);
+        const origImg = await loadImage(origObjectUrl);
 
         // Store original image in offscreen canvas for the Restore brush
         const origCanvas = document.createElement('canvas');
@@ -240,36 +236,15 @@ export const BackgroundRemover: React.FC<BackgroundRemoverProps> = ({
         origCtx?.drawImage(origImg, 0, 0);
         origCanvasRef.current = origCanvas;
 
-        const blob = await removeBackground(file, {
-          model: modelToUse,
-          progress: (key: string, current: number, total: number) => {
-            if (total > 0) {
-              const pct = Math.min(99, Math.round((current / total) * 100));
-              setProgress(pct);
-            }
-            if (key.toLowerCase().includes('fetch')) {
-              setStatusText('Baixando modelo de IA (salvo em cache após a 1ª vez)...');
-            } else {
-              setStatusText('Analisando e removendo o fundo...');
-            }
-          },
-          output: {
-            format: 'image/png',
-          },
+        const aiImgData = await removeImageBackground(file, origObjectUrl, modelToUse, (p) => {
+          setProgress(p.percent);
+          setStatusText(p.message);
         });
 
-        const rawUrl = URL.createObjectURL(blob);
-        const aiImg = await loadImage(rawUrl);
-        URL.revokeObjectURL(rawUrl);
-
         const editCanvas = document.createElement('canvas');
-        editCanvas.width = aiImg.naturalWidth;
-        editCanvas.height = aiImg.naturalHeight;
-        const eCtx = editCanvas.getContext('2d', { willReadFrequently: true });
-        if (eCtx) {
-          eCtx.drawImage(aiImg, 0, 0);
-          rawAiDataRef.current = eCtx.getImageData(0, 0, editCanvas.width, editCanvas.height);
-        }
+        editCanvas.width = aiImgData.width;
+        editCanvas.height = aiImgData.height;
+        rawAiDataRef.current = aiImgData;
         editCanvasRef.current = editCanvas;
 
         await applyEdgeCleanupToCanvas(cleanupVal);
@@ -278,7 +253,7 @@ export const BackgroundRemover: React.FC<BackgroundRemoverProps> = ({
       } catch (err) {
         console.error(err);
         setError(
-          'Não foi possível remover o fundo desta imagem. Verifique sua conexão (necessária na 1ª vez para baixar o modelo de IA) ou tente o modelo Equilibrado.'
+          'Não foi possível processar com este modelo. Verifique sua conexão (necessária na 1ª vez para baixar o modelo de IA) ou tente alternar para Pessoas / Rápido.'
         );
       } finally {
         setIsProcessing(false);
@@ -861,6 +836,9 @@ export const BackgroundRemover: React.FC<BackgroundRemoverProps> = ({
                 </button>
               ))}
             </div>
+            <p className="mt-1.5 text-[11px] text-slate-400 dark:text-slate-500">
+              {MODEL_OPTIONS.find((m) => m.id === aiModel)?.hint}
+            </p>
           </div>
 
           <div>
