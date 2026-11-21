@@ -474,23 +474,30 @@ export async function renderChurchPost(
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
 
-  // Eyebrow
+  const titleY = titleBlockY + 24 * scaleY;
+  const titleHalfH =
+    template.titleStyle === 'fire-gradient' || template.titleStyle === 'impact'
+      ? 84
+      : template.titleStyle === 'neon-pill' || template.titleStyle === 'serif'
+        ? 76
+        : 68;
+
+  // Eyebrow (always clearly above the top edge of the main title)
   if (state.eyebrow.trim()) {
     ctx.fillStyle = template.isLightBg ? accent : '#f8fafc';
     ctx.shadowColor = template.isLightBg ? 'rgba(255,255,255,0.8)' : 'rgba(0,0,0,0.65)';
     ctx.shadowBlur = 8;
-    ctx.font =
-      template.titleStyle === 'serif'
-        ? 'italic 600 44px "Great Vibes", cursive'
-        : '800 30px Montserrat, Inter, sans-serif';
-    ctx.fillText(state.eyebrow, W / 2, titleBlockY - 62 * scaleY);
+    const isScriptEyebrow = template.titleStyle === 'serif';
+    ctx.font = isScriptEyebrow
+      ? 'italic 600 54px "Great Vibes", cursive'
+      : '800 30px Montserrat, Inter, sans-serif';
+    const eyebrowGap = isScriptEyebrow ? 34 : 28;
+    ctx.fillText(state.eyebrow, W / 2, titleY - titleHalfH - eyebrowGap);
   }
 
   // Main Title
   const mainTitle = state.title.trim();
   if (mainTitle) {
-    const titleY = titleBlockY + 12 * scaleY;
-
     if (template.titleStyle === 'script') {
       ctx.font = '400 124px "Great Vibes", cursive';
       ctx.fillStyle = accent;
@@ -537,18 +544,18 @@ export async function renderChurchPost(
     }
   }
 
-  // Subtitle
+  // Subtitle (always clearly below the bottom edge of the main title)
   if (state.subtitle.trim()) {
     ctx.shadowColor = template.isLightBg ? 'rgba(255,255,255,0.7)' : 'rgba(0,0,0,0.65)';
     ctx.shadowBlur = 8;
     if (template.id === 'ceia-bronze') {
-      ctx.font = '400 68px "Great Vibes", cursive';
+      ctx.font = '400 72px "Great Vibes", cursive';
       ctx.fillStyle = template.secondaryColor;
-      ctx.fillText(state.subtitle, W / 2, titleBlockY + 95 * scaleY, W - 120);
+      ctx.fillText(state.subtitle, W / 2, titleY + titleHalfH + 34, W - 120);
     } else {
       ctx.font = '700 28px Montserrat, Inter, sans-serif';
       ctx.fillStyle = textColor;
-      ctx.fillText(state.subtitle, W / 2, titleBlockY + 98 * scaleY, W - 140);
+      ctx.fillText(state.subtitle, W / 2, titleY + titleHalfH + 30, W - 140);
     }
   }
   ctx.restore();
