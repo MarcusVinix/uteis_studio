@@ -74,6 +74,74 @@ export interface ChurchPostState {
 }
 
 const imageCache = new Map<string, HTMLImageElement>();
+const trimCache = new WeakMap<
+  HTMLImageElement,
+  { sx: number; sy: number; sw: number; sh: number }
+>();
+
+/**
+ * Finds the tight non-transparent bounding box of a cutout image so that
+ * portraits with large transparent margins still align flush on the baseline
+ * and scale to consistent visual heights.
+ */
+function getTrimmedBounds(img: HTMLImageElement): {
+  sx: number;
+  sy: number;
+  sw: number;
+  sh: number;
+} {
+  const cached = trimCache.get(img);
+  if (cached) return cached;
+
+  const full = { sx: 0, sy: 0, sw: img.naturalWidth, sh: img.naturalHeight };
+  try {
+    const sampleMax = 256;
+    const scale = Math.min(1, sampleMax / Math.max(img.naturalWidth, img.naturalHeight));
+    const sw = Math.max(1, Math.round(img.naturalWidth * scale));
+    const sh = Math.max(1, Math.round(img.naturalHeight * scale));
+    const c = document.createElement('canvas');
+    c.width = sw;
+    c.height = sh;
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return full;
+    ctx.drawImage(img, 0, 0, sw, sh);
+    const data = ctx.getImageData(0, 0, sw, sh).data;
+
+    let minX = sw;
+    let minY = sh;
+    let maxX = -1;
+    let maxY = -1;
+
+    for (let y = 0; y < sh; y++) {
+      for (let x = 0; x < sw; x++) {
+        const a = data[(y * sw + x) * 4 + 3];
+        if (a > 18) {
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+
+    if (maxX < minX || maxY < minY) {
+      trimCache.set(img, full);
+      return full;
+    }
+
+    const result = {
+      sx: Math.max(0, Math.floor(minX / scale)),
+      sy: Math.max(0, Math.floor(minY / scale)),
+      sw: Math.min(img.naturalWidth, Math.ceil((maxX - minX + 1) / scale)),
+      sh: Math.min(img.naturalHeight, Math.ceil((maxY - minY + 1) / scale)),
+    };
+    trimCache.set(img, result);
+    return result;
+  } catch {
+    trimCache.set(img, full);
+    return full;
+  }
+}
 
 async function getCachedImage(src: string | null | undefined): Promise<HTMLImageElement | null> {
   if (!src) return null;
@@ -128,11 +196,12 @@ function drawPortraitWithBottomFade(
   bottomY: number,
   maxH: number,
   maxW: number,
-  fadeHeightRatio = 0.22
+  fadeHeightRatio = 0.18
 ) {
-  const ratio = Math.min(maxW / img.naturalWidth, maxH / img.naturalHeight);
-  const dw = Math.round(img.naturalWidth * ratio);
-  const dh = Math.round(img.naturalHeight * ratio);
+  const bounds = getTrimmedBounds(img);
+  const ratio = Math.min(maxW / bounds.sw, maxH / bounds.sh);
+  const dw = Math.round(bounds.sw * ratio);
+  const dh = Math.round(bounds.sh * ratio);
   if (dw <= 0 || dh <= 0) return { x: centerX, y: bottomY - maxH, w: 0, h: 0 };
 
   const cleanTemp = document.createElement('canvas');
@@ -141,7 +210,7 @@ function drawPortraitWithBottomFade(
   const cCtx = cleanTemp.getContext('2d');
   if (!cCtx) return { x: centerX - dw / 2, y: bottomY - dh, w: dw, h: dh };
 
-  cCtx.drawImage(img, 0, 0, dw, dh);
+  cCtx.drawImage(img, bounds.sx, bounds.sy, bounds.sw, bounds.sh, 0, 0, dw, dh);
   cCtx.globalCompositeOperation = 'destination-in';
   const maskGrad = cCtx.createLinearGradient(0, 0, 0, dh);
   maskGrad.addColorStop(0, 'rgba(0,0,0,1)');
@@ -492,19 +561,21 @@ export async function renderChurchPost(
   ]);
 
   const hasAnyPortrait = Boolean(preacherImg || localImg || presidentImg || circleImg);
+  const isFourPersonLayout = Boolean(circleImg && preacherImg);
   const titleBlockY = hasAnyPortrait ? 270 * scaleY : 440 * scaleY;
   const portraitBaseY = 935 * scaleY;
 
   if (localImg) {
     const tr = getTr(transforms, 'localPastors');
     const z = (state.localPastorsZoom / 100) * tr.scale;
+    const baseX = isFourPersonLayout ? W * 0.14 : W * 0.19;
     const rect = drawPortraitWithBottomFade(
       ctx,
       localImg,
-      W * 0.19 + tr.dx,
+      baseX + tr.dx,
       portraitBaseY + tr.dy,
-      370 * scaleY * z,
-      330 * z
+      (isFourPersonLayout ? 340 : 370) * scaleY * z,
+      (isFourPersonLayout ? 275 : 330) * z
     );
     pushBox('localPastors', 'Prs. Locais', rect.x, rect.y, rect.w, rect.h);
   }
@@ -512,13 +583,14 @@ export async function renderChurchPost(
   if (presidentImg) {
     const tr = getTr(transforms, 'presidentPastors');
     const z = (state.presidentPastorsZoom / 100) * tr.scale;
+    const baseX = isFourPersonLayout ? W * 0.86 : W * 0.81;
     const rect = drawPortraitWithBottomFade(
       ctx,
       presidentImg,
-      W * 0.81 + tr.dx,
+      baseX + tr.dx,
       portraitBaseY + tr.dy,
-      370 * scaleY * z,
-      330 * z
+      (isFourPersonLayout ? 340 : 370) * scaleY * z,
+      (isFourPersonLayout ? 275 : 330) * z
     );
     pushBox('presidentPastors', 'Prs. Presidentes', rect.x, rect.y, rect.w, rect.h);
   }
@@ -526,13 +598,14 @@ export async function renderChurchPost(
   if (circleImg) {
     const tr = getTr(transforms, 'circleLeader');
     const z = (state.circleLeaderZoom / 100) * tr.scale;
+    const baseX = preacherImg ? W * 0.38 : W * 0.5;
     const rect = drawPortraitWithBottomFade(
       ctx,
       circleImg,
-      W * 0.36 + tr.dx,
-      portraitBaseY - 15 + tr.dy,
-      360 * scaleY * z,
-      270 * z
+      baseX + tr.dx,
+      portraitBaseY + tr.dy,
+      365 * scaleY * z,
+      280 * z
     );
     pushBox('circleLeader', 'Dirigente Círc. Oração', rect.x, rect.y, rect.w, rect.h);
   }
@@ -540,14 +613,14 @@ export async function renderChurchPost(
   if (preacherImg) {
     const tr = getTr(transforms, 'preacher');
     const zoomFactor = (state.preacherZoom / 100) * tr.scale;
-    const centerX = (circleImg ? W * 0.58 : W * 0.5) + tr.dx;
+    const centerX = (circleImg ? W * 0.62 : W * 0.5) + tr.dx;
     const rect = drawPortraitWithBottomFade(
       ctx,
       preacherImg,
       centerX,
       portraitBaseY + state.preacherOffsetY * scaleY + tr.dy,
-      480 * scaleY * zoomFactor,
-      460 * zoomFactor
+      (circleImg ? 420 : 470) * scaleY * zoomFactor,
+      (circleImg ? 350 : 440) * zoomFactor
     );
     pushBox('preacher', 'Foto do Pregador', rect.x, rect.y, rect.w, rect.h);
   }
@@ -660,14 +733,21 @@ export async function renderChurchPost(
   }
 
   // 7. Preacher & Pastors Labels Band
-  const labelCards: { title: string; body: string; x: number }[] = [];
+  const labelCards: { title: string; body: string }[] = [];
 
   if (state.showLocalPastors && profile.localPastorsLabel.trim()) {
     const parts = profile.localPastorsLabel.split('\n');
     labelCards.push({
       title: parts[0] ?? 'Prs. Local',
       body: parts.slice(1).join(' ') || '',
-      x: W * 0.2,
+    });
+  }
+
+  if (state.showCircleLeader && profile.circleLeaderLabel.trim()) {
+    const parts = profile.circleLeaderLabel.split('\n');
+    labelCards.push({
+      title: parts[0] ?? 'Dirigente',
+      body: parts.slice(1).join(' ') || '',
     });
   }
 
@@ -675,14 +755,6 @@ export async function renderChurchPost(
     labelCards.push({
       title: state.preacherRole.trim() || 'PREGADOR',
       body: state.preacherName.trim(),
-      x: W * 0.5,
-    });
-  } else if (state.showCircleLeader && profile.circleLeaderLabel.trim()) {
-    const parts = profile.circleLeaderLabel.split('\n');
-    labelCards.push({
-      title: parts[0] ?? 'Dirigente',
-      body: parts.slice(1).join(' ') || '',
-      x: W * 0.5,
     });
   }
 
@@ -691,7 +763,6 @@ export async function renderChurchPost(
     labelCards.push({
       title: parts[0] ?? 'Prs. Presidentes',
       body: parts.slice(1).join(' ') || '',
-      x: W * 0.8,
     });
   }
 
@@ -705,25 +776,23 @@ export async function renderChurchPost(
 
     let minX = Infinity;
     let maxX = -Infinity;
+    const count = labelCards.length;
+    const cardW = Math.round(
+      (count === 1 ? 420 : count === 2 ? 380 : count === 3 ? 300 : 240) * s
+    );
     const cardH = Math.round(88 * s);
+    const gap = Math.round((count === 4 ? 14 : 24) * s);
+    const totalW = count * cardW + (count - 1) * gap;
+    const startX = W / 2 - totalW / 2 + cardW / 2;
 
     labelCards.forEach((card, idx) => {
-      const cardW = Math.round((labelCards.length === 1 ? 420 : 300) * s);
-      const baseCx =
-        labelCards.length === 1
-          ? W / 2
-          : labelCards.length === 2
-            ? idx === 0
-              ? W * 0.28
-              : W * 0.72
-            : card.x;
-      const cx = baseCx + tr.dx;
+      const cx = startX + idx * (cardW + gap) + tr.dx;
 
       minX = Math.min(minX, cx - cardW / 2);
       maxX = Math.max(maxX, cx + cardW / 2);
 
       drawRoundedRect(ctx, cx - cardW / 2, labelY - cardH / 2, cardW, cardH, 16 * s);
-      ctx.fillStyle = template.isLightBg ? 'rgba(255,255,255,0.82)' : 'rgba(15,23,42,0.72)';
+      ctx.fillStyle = template.isLightBg ? 'rgba(255,255,255,0.86)' : 'rgba(15,23,42,0.72)';
       ctx.fill();
       ctx.lineWidth = 1.5;
       ctx.strokeStyle = template.isLightBg
@@ -732,12 +801,12 @@ export async function renderChurchPost(
       ctx.stroke();
 
       ctx.fillStyle = accent;
-      ctx.font = `800 ${Math.round(18 * s)}px Montserrat, Inter, sans-serif`;
-      ctx.fillText(card.title.toUpperCase(), cx, labelY - 18 * s, cardW - 24);
+      ctx.font = `800 ${Math.round((count === 4 ? 15 : 18) * s)}px Montserrat, Inter, sans-serif`;
+      ctx.fillText(card.title.toUpperCase(), cx, labelY - 18 * s, cardW - 20);
 
       ctx.fillStyle = template.isLightBg ? '#334155' : '#f8fafc';
-      ctx.font = `700 ${Math.round(19 * s)}px Montserrat, Inter, sans-serif`;
-      ctx.fillText(card.body, cx, labelY + 14 * s, cardW - 24);
+      ctx.font = `700 ${Math.round((count === 4 ? 16 : 19) * s)}px Montserrat, Inter, sans-serif`;
+      ctx.fillText(card.body, cx, labelY + 14 * s, cardW - 20);
     });
 
     ctx.restore();
