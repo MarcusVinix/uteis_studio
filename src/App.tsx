@@ -1,10 +1,20 @@
 import { useState, useEffect } from 'react';
-import { Sparkles, Crop, Minimize2, ShieldCheck, Wand2, Sun, Moon } from 'lucide-react';
+import {
+  Sparkles,
+  Crop,
+  Minimize2,
+  ShieldCheck,
+  Wand2,
+  Sun,
+  Moon,
+  LayoutTemplate,
+} from 'lucide-react';
 import { BackgroundRemover } from './tools/BackgroundRemover';
 import { ImageCropResize } from './tools/ImageCropResize';
 import { ImageCompressor } from './tools/ImageCompressor';
+import { ChurchPostGenerator } from './tools/ChurchPostGenerator';
 
-type ToolId = 'bg' | 'crop' | 'compress';
+type ToolId = 'bg' | 'church' | 'crop' | 'compress';
 
 const TOOLS: {
   id: ToolId;
@@ -19,9 +29,18 @@ const TOOLS: {
     name: 'Removedor de Fundo',
     shortName: 'Remover Fundo',
     description:
-      'Remova o fundo com IA de alta precisão, refine com pincel apagar/restaurar e troque o fundo.',
+      'IA de alta precisão (BRIA RMBG & Retrato), pincel apagar/restaurar e troca de fundo.',
     icon: Sparkles,
     badge: 'IA',
+  },
+  {
+    id: 'church',
+    name: 'Posts para Igreja',
+    shortName: 'Posts Igreja',
+    description:
+      'Templates prontos (Jovens, Irmãs, Santa Ceia, Família e Campanha) com acervo embutido.',
+    icon: LayoutTemplate,
+    badge: 'NOVO',
   },
   {
     id: 'crop',
@@ -117,7 +136,7 @@ export default function App() {
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8 sm:px-6">
         {/* Tool Navigation Tabs */}
         <div className="mb-8 flex flex-col gap-6">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {TOOLS.map((tool) => {
               const Icon = tool.icon;
               const isActive = activeTool === tool.id;
@@ -125,7 +144,7 @@ export default function App() {
                 <button
                   key={tool.id}
                   onClick={() => setActiveTool(tool.id)}
-                  className={`group flex items-start gap-3.5 rounded-2xl border p-4 text-left transition-all ${
+                  className={`group flex items-start gap-3 rounded-2xl border p-4 text-left transition-all ${
                     isActive
                       ? 'border-violet-500 bg-white dark:bg-slate-900 shadow-md shadow-violet-100/80 dark:shadow-violet-950/40 ring-1 ring-violet-500/25'
                       : 'border-slate-200/80 dark:border-slate-800 bg-white/70 dark:bg-slate-900/50 hover:border-slate-300 dark:hover:border-slate-700 hover:bg-white dark:hover:bg-slate-900'
@@ -141,9 +160,9 @@ export default function App() {
                     <Icon className="h-5 w-5" />
                   </div>
                   <div className="min-w-0">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1.5">
                       <span
-                        className={`text-sm font-bold ${
+                        className={`text-sm font-bold truncate ${
                           isActive
                             ? 'text-violet-950 dark:text-white'
                             : 'text-slate-800 dark:text-slate-200'
@@ -152,7 +171,7 @@ export default function App() {
                         {tool.name}
                       </span>
                       {tool.badge && (
-                        <span className="rounded-md bg-gradient-to-r from-cyan-500 to-violet-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                        <span className="shrink-0 rounded-md bg-gradient-to-r from-cyan-500 to-violet-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
                           {tool.badge}
                         </span>
                       )}
@@ -184,6 +203,13 @@ export default function App() {
             initialFile={transferredFile}
             onClearInitialFile={() => setTransferredFile(null)}
             onSendToTool={(target, file) => handleSendToTool(target, file)}
+          />
+        )}
+
+        {activeTool === 'church' && (
+          <ChurchPostGenerator
+            initialPreacherFile={transferredFile}
+            onClearInitialFile={() => setTransferredFile(null)}
           />
         )}
 

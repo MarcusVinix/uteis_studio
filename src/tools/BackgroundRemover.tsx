@@ -14,6 +14,7 @@ import {
   Paintbrush,
   Undo2,
   RefreshCw,
+  LayoutTemplate,
 } from 'lucide-react';
 import { DropZone } from '../components/DropZone';
 import {
@@ -28,7 +29,7 @@ import { removeImageBackground, type BgEngine } from '../utils/aiBackgroundRemov
 interface BackgroundRemoverProps {
   initialFile?: File | null;
   onClearInitialFile?: () => void;
-  onSendToTool: (tool: 'crop' | 'compress', file: File) => void;
+  onSendToTool: (tool: 'crop' | 'compress' | 'church', file: File) => void;
 }
 
 type BgOption =
@@ -489,7 +490,7 @@ export const BackgroundRemover: React.FC<BackgroundRemoverProps> = ({
     downloadBlob(blob, `${stripExtension(sourceFile.name)}-sem-fundo.${ext}`);
   };
 
-  const handleForwardTo = async (tool: 'crop' | 'compress') => {
+  const handleForwardTo = async (tool: 'crop' | 'compress' | 'church') => {
     const blob = await composeFinalBlob('image/png');
     if (!blob || !sourceFile) return;
     const nextFile = new File([blob], `${stripExtension(sourceFile.name)}-sem-fundo.png`, {
@@ -1038,6 +1039,13 @@ export const BackgroundRemover: React.FC<BackgroundRemoverProps> = ({
                   Comprimir
                 </button>
               </div>
+              <button
+                onClick={() => handleForwardTo('church')}
+                className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-violet-300 dark:border-violet-500/40 bg-violet-50 dark:bg-violet-500/10 px-3 py-2 text-xs font-semibold text-violet-700 dark:text-violet-300 transition hover:bg-violet-100 dark:hover:bg-violet-500/20"
+              >
+                <LayoutTemplate className="h-3.5 w-3.5" />
+                Usar foto no Post da Igreja
+              </button>
               {historyCount > 0 && (
                 <button
                   onClick={() => applyEdgeCleanupToCanvas(edgeCleanup)}
