@@ -21,12 +21,18 @@ import {
   CATEGORY_LABELS,
   POST_FORMATS,
   DEFAULT_CHURCH_PROFILE,
+  LAYOUT_OPTIONS,
+  CARD_STYLE_OPTIONS,
+  DATE_STYLE_OPTIONS,
   type ChurchCategory,
   type ChurchProfile,
   type ChurchTemplate,
   type PostFormatId,
   type TextureStyle,
   type FrameStyle,
+  type LayoutMode,
+  type CardStyle,
+  type DateStyle,
 } from '../utils/churchAssets';
 import {
   renderChurchPost,
@@ -145,7 +151,11 @@ export const ChurchPostGenerator: React.FC<ChurchPostGeneratorProps> = ({
 
   // Visual / Asset overrides
   const [backgroundId, setBackgroundId] = useState(template.backgroundId);
+  const [bgFilter, setBgFilter] = useState<ChurchCategory | 'all'>('all');
   const [customBgUrl, setCustomBgUrl] = useState<string | null>(null);
+  const [layoutMode, setLayoutMode] = useState<LayoutMode>(template.layoutMode);
+  const [cardStyle, setCardStyle] = useState<CardStyle>(template.cardStyle);
+  const [dateStyle, setDateStyle] = useState<DateStyle>(template.dateStyle);
   const [accentColor, setAccentColor] = useState(template.accentColor);
   const [bgDim, setBgDim] = useState(template.defaultDim);
   const [texture, setTexture] = useState<TextureStyle>(template.defaultTexture);
@@ -187,6 +197,9 @@ export const ChurchPostGenerator: React.FC<ChurchPostGeneratorProps> = ({
     setSelectedCategory(tpl.category);
     setBackgroundId(tpl.backgroundId);
     setCustomBgUrl(null);
+    setLayoutMode(tpl.layoutMode);
+    setCardStyle(tpl.cardStyle);
+    setDateStyle(tpl.dateStyle);
     setAccentColor(tpl.accentColor);
     setBgDim(tpl.defaultDim);
     setTexture(tpl.defaultTexture);
@@ -225,6 +238,9 @@ export const ChurchPostGenerator: React.FC<ChurchPostGeneratorProps> = ({
         template,
         background: currentBg,
         customBgUrl,
+        layoutMode,
+        cardStyle,
+        dateStyle,
         width: currentFormat.width,
         height: currentFormat.height,
         eyebrow,
@@ -260,6 +276,9 @@ export const ChurchPostGenerator: React.FC<ChurchPostGeneratorProps> = ({
     template,
     currentBg,
     customBgUrl,
+    layoutMode,
+    cardStyle,
+    dateStyle,
     currentFormat,
     eyebrow,
     title,
@@ -639,7 +658,7 @@ export const ChurchPostGenerator: React.FC<ChurchPostGeneratorProps> = ({
         <div className="grid grid-cols-3 gap-1.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-1.5 shadow-xs">
           {[
             { id: 'dados', label: 'Dados do Culto', icon: LayoutTemplate },
-            { id: 'acervo', label: 'Acervo & Fundo', icon: Palette },
+            { id: 'acervo', label: 'Acervo & Layout', icon: Palette },
             { id: 'perfil', label: 'Perfil da Igreja', icon: UserCircle2 },
           ].map((tab) => {
             const Icon = tab.icon;
@@ -993,13 +1012,77 @@ export const ChurchPostGenerator: React.FC<ChurchPostGeneratorProps> = ({
           </div>
         )}
 
-        {/* TAB 2: ACERVO & FUNDO */}
+        {/* TAB 2: ACERVO & LAYOUT */}
         {activeTab === 'acervo' && (
           <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-xs space-y-5">
+            {/* Structural Layout Selector */}
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                Estrutura do Layout
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                {LAYOUT_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.id}
+                    onClick={() => {
+                      setLayoutMode(opt.id);
+                      setTransforms({});
+                    }}
+                    className={`rounded-xl border p-2.5 text-left transition ${
+                      layoutMode === opt.id
+                        ? 'border-violet-500 bg-violet-50 dark:bg-violet-500/15 text-violet-700 dark:text-violet-300'
+                        : 'border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    <p className="text-xs font-bold">{opt.label}</p>
+                    <p className="mt-0.5 text-[10px] opacity-75">{opt.desc}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Card Style & Date Style */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                  Estilo dos Cards
+                </p>
+                <select
+                  value={cardStyle}
+                  onChange={(e) => setCardStyle(e.target.value as CardStyle)}
+                  className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200"
+                >
+                  {CARD_STYLE_OPTIONS.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                  Estilo da Data
+                </p>
+                <select
+                  value={dateStyle}
+                  onChange={(e) => setDateStyle(e.target.value as DateStyle)}
+                  className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200"
+                >
+                  {DATE_STYLE_OPTIONS.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <hr className="border-slate-100 dark:border-slate-800" />
+
             <div>
               <div className="flex items-center justify-between mb-2">
                 <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-                  Acervo de Fundos Embutidos
+                  Acervo de Fundos ({CHURCH_BACKGROUNDS.length})
                 </p>
                 <label className="inline-flex cursor-pointer items-center gap-1 rounded-lg bg-violet-50 dark:bg-violet-500/15 px-2.5 py-1 text-[11px] font-semibold text-violet-700 dark:text-violet-300 hover:bg-violet-100">
                   <Upload className="h-3 w-3" />
@@ -1020,8 +1103,37 @@ export const ChurchPostGenerator: React.FC<ChurchPostGeneratorProps> = ({
                 </label>
               </div>
 
-              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-                {CHURCH_BACKGROUNDS.map((bg) => {
+              {/* Filter chips */}
+              <div className="mb-2.5 flex flex-wrap gap-1">
+                <button
+                  onClick={() => setBgFilter('all')}
+                  className={`rounded-lg px-2 py-1 text-[11px] font-semibold transition ${
+                    bgFilter === 'all'
+                      ? 'bg-violet-600 text-white'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  Todos
+                </button>
+                {CATEGORY_LABELS.map((cat) => (
+                  <button
+                    key={cat.id}
+                    onClick={() => setBgFilter(cat.id)}
+                    className={`rounded-lg px-2 py-1 text-[11px] font-semibold transition ${
+                      bgFilter === cat.id
+                        ? 'bg-violet-600 text-white'
+                        : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                  >
+                    {cat.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 max-h-64 overflow-y-auto pr-1">
+                {CHURCH_BACKGROUNDS.filter(
+                  (bg) => bgFilter === 'all' || bg.category === bgFilter || bg.category === 'geral'
+                ).map((bg) => {
                   const active = !customBgUrl && backgroundId === bg.id;
                   return (
                     <button

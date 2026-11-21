@@ -2,6 +2,9 @@ export type ChurchCategory = 'jovens' | 'irmas' | 'ceia' | 'familia' | 'campanha
 export type PostFormatId = 'feed45' | 'square' | 'stories';
 export type TextureStyle = 'none' | 'grain' | 'paper' | 'sparkles';
 export type FrameStyle = 'none' | 'thin' | 'double' | 'corners';
+export type LayoutMode = 'classic' | 'hero-overlap' | 'editorial' | 'minimal-focus';
+export type CardStyle = 'glass' | 'minimal' | 'solid' | 'pill';
+export type DateStyle = 'pill' | 'outline' | 'ribbon' | 'stamp';
 
 export interface PostFormat {
   id: PostFormatId;
@@ -15,6 +18,27 @@ export const POST_FORMATS: PostFormat[] = [
   { id: 'feed45', label: 'Feed Vertical', width: 1080, height: 1350, ratioLabel: '4:5' },
   { id: 'square', label: 'Quadrado', width: 1080, height: 1080, ratioLabel: '1:1' },
   { id: 'stories', label: 'Stories / Status', width: 1080, height: 1920, ratioLabel: '9:16' },
+];
+
+export const LAYOUT_OPTIONS: { id: LayoutMode; label: string; desc: string }[] = [
+  { id: 'classic', label: 'Clássico', desc: 'Título no topo, fotos no centro' },
+  { id: 'hero-overlap', label: 'Título na Frente', desc: 'Fotos atrás + título gigante à frente' },
+  { id: 'editorial', label: 'Editorial', desc: 'Data no topo + título no centro' },
+  { id: 'minimal-focus', label: 'Foco no Tema', desc: 'Destaque central para título e versículo' },
+];
+
+export const CARD_STYLE_OPTIONS: { id: CardStyle; label: string }[] = [
+  { id: 'glass', label: 'Vidro' },
+  { id: 'minimal', label: 'Limpo (Divisórias)' },
+  { id: 'solid', label: 'Sólido' },
+  { id: 'pill', label: 'Cápsula' },
+];
+
+export const DATE_STYLE_OPTIONS: { id: DateStyle; label: string }[] = [
+  { id: 'pill', label: 'Cápsula' },
+  { id: 'outline', label: 'Borda Fina' },
+  { id: 'ribbon', label: 'Faixa Larga' },
+  { id: 'stamp', label: 'Selo Oval' },
 ];
 
 export interface ChurchProfile {
@@ -52,6 +76,7 @@ export interface BackgroundAsset {
 }
 
 export const CHURCH_BACKGROUNDS: BackgroundAsset[] = [
+  // Jovens
   {
     id: 'bg-jovens-crowd',
     name: 'Louvor Jovens',
@@ -61,6 +86,15 @@ export const CHURCH_BACKGROUNDS: BackgroundAsset[] = [
     isLight: false,
   },
   {
+    id: 'bg-jovens-purple',
+    name: 'Jovens Neon Roxo',
+    category: 'jovens',
+    type: 'image',
+    src: '/assets/church/bg-jovens-purple.jpg',
+    isLight: false,
+  },
+  // Irmãs
+  {
     id: 'bg-irmas-floral',
     name: 'Floral Rosé',
     category: 'irmas',
@@ -68,6 +102,23 @@ export const CHURCH_BACKGROUNDS: BackgroundAsset[] = [
     src: '/assets/church/bg-irmas-floral.jpg',
     isLight: true,
   },
+  {
+    id: 'bg-irmas-lavender',
+    name: 'Floral Lavanda',
+    category: 'irmas',
+    type: 'image',
+    src: '/assets/church/bg-irmas-lavender.jpg',
+    isLight: true,
+  },
+  {
+    id: 'bg-irmas-gold',
+    name: 'Champagne & Rosas',
+    category: 'irmas',
+    type: 'image',
+    src: '/assets/church/bg-irmas-gold.jpg',
+    isLight: true,
+  },
+  // Santa Ceia
   {
     id: 'bg-ceia-dark',
     name: 'Ceia Bronze',
@@ -85,6 +136,15 @@ export const CHURCH_BACKGROUNDS: BackgroundAsset[] = [
     isLight: true,
   },
   {
+    id: 'bg-ceia-bread-wine',
+    name: 'Luz de Velas & Trigo',
+    category: 'ceia',
+    type: 'image',
+    src: '/assets/church/bg-ceia-bread-wine.jpg',
+    isLight: false,
+  },
+  // Família
+  {
     id: 'bg-familia-sunset',
     name: 'Pôr do Sol & Cruz',
     category: 'familia',
@@ -93,6 +153,15 @@ export const CHURCH_BACKGROUNDS: BackgroundAsset[] = [
     isLight: false,
   },
   {
+    id: 'bg-familia-warm',
+    name: 'Bokeh Dourado & Azul',
+    category: 'familia',
+    type: 'image',
+    src: '/assets/church/bg-familia-warm.jpg',
+    isLight: false,
+  },
+  // Campanha
+  {
     id: 'bg-campanha-dark',
     name: 'Campanha Fogo',
     category: 'campanha',
@@ -100,6 +169,15 @@ export const CHURCH_BACKGROUNDS: BackgroundAsset[] = [
     src: '/assets/church/bg-campanha-dark.jpg',
     isLight: false,
   },
+  {
+    id: 'bg-campanha-blue-fire',
+    name: 'Raios de Luz Divina',
+    category: 'campanha',
+    type: 'image',
+    src: '/assets/church/bg-campanha-blue-fire.jpg',
+    isLight: false,
+  },
+  // Gradients embutidos
   {
     id: 'grad-amber',
     name: 'Âmbar Texturizado',
@@ -132,6 +210,22 @@ export const CHURCH_BACKGROUNDS: BackgroundAsset[] = [
     colors: ['#0f172a', '#1e3a5f', '#090d16'],
     isLight: false,
   },
+  {
+    id: 'grad-emerald',
+    name: 'Esmeralda Profundo',
+    category: 'geral',
+    type: 'gradient',
+    colors: ['#064e3b', '#022c22', '#090d16'],
+    isLight: false,
+  },
+  {
+    id: 'grad-cream',
+    name: 'Marfim Elegante',
+    category: 'geral',
+    type: 'gradient',
+    colors: ['#fdf8f1', '#f3e5d0', '#e7d2b5'],
+    isLight: true,
+  },
 ];
 
 export interface ChurchTemplate {
@@ -140,6 +234,9 @@ export interface ChurchTemplate {
   category: ChurchCategory;
   categoryLabel: string;
   backgroundId: string;
+  layoutMode: LayoutMode;
+  cardStyle: CardStyle;
+  dateStyle: DateStyle;
   titleStyle: 'script' | 'impact' | 'serif' | 'neon-pill' | 'fire-gradient';
   accentColor: string;
   secondaryColor: string;
@@ -154,16 +251,20 @@ export interface ChurchTemplate {
   defaultShowCircleLeader: boolean;
   defaultTexture: TextureStyle;
   defaultFrame: FrameStyle;
-  defaultDim: number; // 0..75
+  defaultDim: number;
 }
 
 export const CHURCH_TEMPLATES: ChurchTemplate[] = [
+  // JOVENS (3 templates)
   {
     id: 'jovens-gold',
-    name: 'Jovens • Amarelo',
+    name: 'Jovens • Amarelo Impacto',
     category: 'jovens',
     categoryLabel: 'Culto de Jovens',
     backgroundId: 'bg-jovens-crowd',
+    layoutMode: 'hero-overlap',
+    cardStyle: 'minimal',
+    dateStyle: 'outline',
     titleStyle: 'impact',
     accentColor: '#facc15',
     secondaryColor: '#ffffff',
@@ -171,14 +272,14 @@ export const CHURCH_TEMPLATES: ChurchTemplate[] = [
     isLightBg: false,
     defaultEyebrow: 'CULTO DE',
     defaultTitle: 'JOVENS',
-    defaultSubtitle: 'Não perca!',
-    defaultDateText: 'DOMINGO • 22/11 • 18H00',
+    defaultSubtitle: '',
+    defaultDateText: 'DOMINGO | 18H00',
     defaultVerse: '',
     defaultShowFoodBadge: false,
     defaultShowCircleLeader: false,
     defaultTexture: 'grain',
     defaultFrame: 'none',
-    defaultDim: 35,
+    defaultDim: 30,
   },
   {
     id: 'jovens-neon',
@@ -186,6 +287,9 @@ export const CHURCH_TEMPLATES: ChurchTemplate[] = [
     category: 'jovens',
     categoryLabel: 'Culto de Jovens',
     backgroundId: 'bg-jovens-crowd',
+    layoutMode: 'classic',
+    cardStyle: 'glass',
+    dateStyle: 'pill',
     titleStyle: 'neon-pill',
     accentColor: '#e2ff66',
     secondaryColor: '#111827',
@@ -200,14 +304,44 @@ export const CHURCH_TEMPLATES: ChurchTemplate[] = [
     defaultShowCircleLeader: false,
     defaultTexture: 'sparkles',
     defaultFrame: 'none',
-    defaultDim: 40,
+    defaultDim: 38,
   },
+  {
+    id: 'jovens-purple',
+    name: 'Jovens • Neon Roxo',
+    category: 'jovens',
+    categoryLabel: 'Culto de Jovens',
+    backgroundId: 'bg-jovens-purple',
+    layoutMode: 'hero-overlap',
+    cardStyle: 'glass',
+    dateStyle: 'pill',
+    titleStyle: 'impact',
+    accentColor: '#38bdf8',
+    secondaryColor: '#e879f9',
+    textColor: '#ffffff',
+    isLightBg: false,
+    defaultEyebrow: 'NOITE DE ADORAÇÃO',
+    defaultTitle: 'CULTO JOVEM',
+    defaultSubtitle: 'Traga um amigo!',
+    defaultDateText: 'SÁBADO • 19H30',
+    defaultVerse: '',
+    defaultShowFoodBadge: false,
+    defaultShowCircleLeader: false,
+    defaultTexture: 'sparkles',
+    defaultFrame: 'thin',
+    defaultDim: 25,
+  },
+
+  // IRMÃS (3 templates)
   {
     id: 'irmas-floral',
     name: 'Irmãs • Floral Rosé',
     category: 'irmas',
     categoryLabel: 'Culto das Irmãs',
     backgroundId: 'bg-irmas-floral',
+    layoutMode: 'classic',
+    cardStyle: 'glass',
+    dateStyle: 'stamp',
     titleStyle: 'script',
     accentColor: '#9f2c48',
     secondaryColor: '#c2516b',
@@ -225,19 +359,22 @@ export const CHURCH_TEMPLATES: ChurchTemplate[] = [
     defaultDim: 0,
   },
   {
-    id: 'irmas-aquarela',
-    name: 'Irmãs • Aquarela Bordô',
+    id: 'irmas-lavender',
+    name: 'Irmãs • Floral Lavanda',
     category: 'irmas',
     categoryLabel: 'Culto das Irmãs',
-    backgroundId: 'grad-rose',
-    titleStyle: 'impact',
-    accentColor: '#9f2c48',
-    secondaryColor: '#ffffff',
-    textColor: '#6d1d33',
+    backgroundId: 'bg-irmas-lavender',
+    layoutMode: 'classic',
+    cardStyle: 'minimal',
+    dateStyle: 'pill',
+    titleStyle: 'script',
+    accentColor: '#6d28d9',
+    secondaryColor: '#9333ea',
+    textColor: '#3b0764',
     isLightBg: true,
-    defaultEyebrow: 'Mulheres de fé e oração, venham se renovar em Deus!',
-    defaultTitle: 'CULTO DAS IRMÃS',
-    defaultSubtitle: '',
+    defaultEyebrow: 'Círculo de Oração',
+    defaultTitle: 'Culto das Irmãs',
+    defaultSubtitle: 'Uma noite de renovo e gratidão',
     defaultDateText: 'DOMINGO • 20/09 • 18H00',
     defaultVerse: '',
     defaultShowFoodBadge: false,
@@ -247,11 +384,41 @@ export const CHURCH_TEMPLATES: ChurchTemplate[] = [
     defaultDim: 0,
   },
   {
+    id: 'irmas-gold',
+    name: 'Irmãs • Champagne',
+    category: 'irmas',
+    categoryLabel: 'Culto das Irmãs',
+    backgroundId: 'bg-irmas-gold',
+    layoutMode: 'editorial',
+    cardStyle: 'glass',
+    dateStyle: 'outline',
+    titleStyle: 'serif',
+    accentColor: '#9a3412',
+    secondaryColor: '#c2410c',
+    textColor: '#431407',
+    isLightBg: true,
+    defaultEyebrow: 'ENCONTRO DE MULHERES',
+    defaultTitle: 'CULTO DAS IRMÃS',
+    defaultSubtitle: 'Mulheres virtuosas na presença de Deus',
+    defaultDateText: 'DOMINGO • 18H00',
+    defaultVerse: '',
+    defaultShowFoodBadge: false,
+    defaultShowCircleLeader: true,
+    defaultTexture: 'paper',
+    defaultFrame: 'double',
+    defaultDim: 0,
+  },
+
+  // SANTA CEIA (3 templates)
+  {
     id: 'ceia-bronze',
     name: 'Santa Ceia • Bronze',
     category: 'ceia',
     categoryLabel: 'Santa Ceia',
     backgroundId: 'bg-ceia-dark',
+    layoutMode: 'editorial',
+    cardStyle: 'solid',
+    dateStyle: 'pill',
     titleStyle: 'impact',
     accentColor: '#f3d19c',
     secondaryColor: '#c68b45',
@@ -274,6 +441,9 @@ export const CHURCH_TEMPLATES: ChurchTemplate[] = [
     category: 'ceia',
     categoryLabel: 'Santa Ceia',
     backgroundId: 'bg-ceia-parchment',
+    layoutMode: 'minimal-focus',
+    cardStyle: 'glass',
+    dateStyle: 'outline',
     titleStyle: 'impact',
     accentColor: '#ffffff',
     secondaryColor: '#452815',
@@ -283,7 +453,7 @@ export const CHURCH_TEMPLATES: ChurchTemplate[] = [
     defaultTitle: 'SANTA CEIA',
     defaultSubtitle: '',
     defaultDateText: 'DOMINGO • ÀS 18HRS',
-    defaultVerse: '',
+    defaultVerse: '"Fazei isto em memória de mim." — 1 Coríntios 11:24',
     defaultShowFoodBadge: true,
     defaultShowCircleLeader: false,
     defaultTexture: 'paper',
@@ -291,11 +461,41 @@ export const CHURCH_TEMPLATES: ChurchTemplate[] = [
     defaultDim: 22,
   },
   {
+    id: 'ceia-velas',
+    name: 'Santa Ceia • Velas & Trigo',
+    category: 'ceia',
+    categoryLabel: 'Santa Ceia',
+    backgroundId: 'bg-ceia-bread-wine',
+    layoutMode: 'classic',
+    cardStyle: 'glass',
+    dateStyle: 'ribbon',
+    titleStyle: 'serif',
+    accentColor: '#f5b942',
+    secondaryColor: '#fde68a',
+    textColor: '#fffbeb',
+    isLightBg: false,
+    defaultEyebrow: 'Culto de Comunhão',
+    defaultTitle: 'SANTA CEIA',
+    defaultSubtitle: 'Venha participar conosco',
+    defaultDateText: 'SÁBADO • ÀS 19H00',
+    defaultVerse: '',
+    defaultShowFoodBadge: true,
+    defaultShowCircleLeader: false,
+    defaultTexture: 'grain',
+    defaultFrame: 'double',
+    defaultDim: 18,
+  },
+
+  // FAMÍLIA (3 templates)
+  {
     id: 'familia-sunset',
     name: 'Família • Pôr do Sol',
     category: 'familia',
     categoryLabel: 'Culto da Família',
     backgroundId: 'bg-familia-sunset',
+    layoutMode: 'classic',
+    cardStyle: 'minimal',
+    dateStyle: 'ribbon',
     titleStyle: 'serif',
     accentColor: '#f5b942',
     secondaryColor: '#ffffff',
@@ -313,11 +513,66 @@ export const CHURCH_TEMPLATES: ChurchTemplate[] = [
     defaultDim: 15,
   },
   {
+    id: 'familia-navy',
+    name: 'Família • Bokeh Azul',
+    category: 'familia',
+    categoryLabel: 'Culto da Família',
+    backgroundId: 'bg-familia-warm',
+    layoutMode: 'minimal-focus',
+    cardStyle: 'glass',
+    dateStyle: 'pill',
+    titleStyle: 'serif',
+    accentColor: '#fbbf24',
+    secondaryColor: '#ffffff',
+    textColor: '#ffffff',
+    isLightBg: false,
+    defaultEyebrow: 'culto da',
+    defaultTitle: 'FAMÍLIA',
+    defaultSubtitle: 'Traga toda a sua casa!',
+    defaultDateText: 'DOMINGO • 18H00',
+    defaultVerse: '"Abençoada é a família que teme ao Senhor."',
+    defaultShowFoodBadge: false,
+    defaultShowCircleLeader: false,
+    defaultTexture: 'sparkles',
+    defaultFrame: 'corners',
+    defaultDim: 15,
+  },
+  {
+    id: 'familia-royal',
+    name: 'Família • Editorial',
+    category: 'familia',
+    categoryLabel: 'Culto da Família',
+    backgroundId: 'grad-royal',
+    layoutMode: 'editorial',
+    cardStyle: 'solid',
+    dateStyle: 'outline',
+    titleStyle: 'serif',
+    accentColor: '#f5b942',
+    secondaryColor: '#fde68a',
+    textColor: '#ffffff',
+    isLightBg: false,
+    defaultEyebrow: 'NOITE DE BÊNÇÃOS',
+    defaultTitle: 'FAMÍLIA',
+    defaultSubtitle: '',
+    defaultDateText: 'DOMINGO • 18H00',
+    defaultVerse: '"Eu e a minha casa serviremos ao Senhor." — Josué 24:15',
+    defaultShowFoodBadge: false,
+    defaultShowCircleLeader: false,
+    defaultTexture: 'grain',
+    defaultFrame: 'double',
+    defaultDim: 0,
+  },
+
+  // CAMPANHA / QUARTA (3 templates)
+  {
     id: 'campanha-fogo',
-    name: 'Campanha • Impacto',
+    name: 'Campanha • Impacto Fogo',
     category: 'campanha',
     categoryLabel: 'Campanha / Quarta',
     backgroundId: 'bg-campanha-dark',
+    layoutMode: 'hero-overlap',
+    cardStyle: 'minimal',
+    dateStyle: 'outline',
     titleStyle: 'fire-gradient',
     accentColor: '#ff512f',
     secondaryColor: '#f9d423',
@@ -335,11 +590,39 @@ export const CHURCH_TEMPLATES: ChurchTemplate[] = [
     defaultDim: 20,
   },
   {
+    id: 'campanha-luz',
+    name: 'Campanha • Luz Divina',
+    category: 'campanha',
+    categoryLabel: 'Campanha / Quarta',
+    backgroundId: 'bg-campanha-blue-fire',
+    layoutMode: 'classic',
+    cardStyle: 'glass',
+    dateStyle: 'ribbon',
+    titleStyle: 'impact',
+    accentColor: '#facc15',
+    secondaryColor: '#38bdf8',
+    textColor: '#ffffff',
+    isLightBg: false,
+    defaultEyebrow: 'NOITE DE MILAGRES',
+    defaultTitle: 'CAMPANHA',
+    defaultSubtitle: 'Venha buscar a sua vitória!',
+    defaultDateText: 'QUARTA-FEIRA • 19H30',
+    defaultVerse: '',
+    defaultShowFoodBadge: false,
+    defaultShowCircleLeader: false,
+    defaultTexture: 'grain',
+    defaultFrame: 'thin',
+    defaultDim: 20,
+  },
+  {
     id: 'quarta-ambar',
     name: 'Culto de Quarta • Âmbar',
     category: 'campanha',
     categoryLabel: 'Campanha / Quarta',
     backgroundId: 'grad-amber',
+    layoutMode: 'hero-overlap',
+    cardStyle: 'glass',
+    dateStyle: 'pill',
     titleStyle: 'impact',
     accentColor: '#fef3c7',
     secondaryColor: '#f59e0b',
