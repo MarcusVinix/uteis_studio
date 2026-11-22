@@ -164,7 +164,9 @@ export const ChurchPostGenerator: React.FC<ChurchPostGeneratorProps> = ({
   // Busy states for built-in AI bg removal
   const [busySlot, setBusySlot] = useState<string | null>(null);
   const [exportFormat, setExportFormat] = useState<'image/png' | 'image/jpeg'>('image/png');
-  const [savedNotice, setSavedNotice] = useState(false);
+  const [profileNotice, setProfileNotice] = useState<{ type: 'ok' | 'err'; text: string } | null>(
+    null
+  );
 
   // Interactive Canva-style drag & resize state
   const [transforms, setTransforms] = useState<ElementTransformMap>({});
@@ -484,10 +486,34 @@ export const ChurchPostGenerator: React.FC<ChurchPostGeneratorProps> = ({
         ? await removeBgFromFileToDataUrl(file)
         : await fileToDataUrl(file, slot === 'logoDataUrl' ? 400 : 800);
       setProfile((prev) => ({ ...prev, [slot]: dataUrl }));
-      setSavedNotice(true);
-      setTimeout(() => setSavedNotice(false), 2000);
+      setProfileNotice({ type: 'ok', text: 'Salvo' });
+      setTimeout(() => setProfileNotice(null), 2500);
     } finally {
       setBusySlot(null);
+    }
+  };
+
+  const handleExportProfile = () => {
+    const payload = JSON.stringify(profile, null, 2);
+    const blob = new Blob([payload], { type: 'application/json' });
+    downloadBlob(blob, 'perfil-igreja-uteis-studio.json');
+    setProfileNotice({ type: 'ok', text: 'Backup exportado!' });
+    setTimeout(() => setProfileNotice(null), 2500);
+  };
+
+  const handleImportProfile = async (file: File) => {
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text) as Partial<ChurchProfile>;
+      if (typeof parsed !== 'object' || parsed === null || typeof parsed.churchName !== 'string') {
+        throw new Error('Formato inválido');
+      }
+      setProfile({ ...DEFAULT_CHURCH_PROFILE, ...parsed });
+      setProfileNotice({ type: 'ok', text: 'Perfil importado!' });
+      setTimeout(() => setProfileNotice(null), 3000);
+    } catch {
+      setProfileNotice({ type: 'err', text: 'Arquivo inválido' });
+      setTimeout(() => setProfileNotice(null), 3000);
     }
   };
 
@@ -1268,21 +1294,52 @@ export const ChurchPostGenerator: React.FC<ChurchPostGeneratorProps> = ({
         {/* TAB 3: PERFIL DA IGREJA (SAVED IN BROWSER) */}
         {activeTab === 'perfil' && (
           <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-xs space-y-4">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2">
               <div>
                 <h3 className="text-sm font-bold text-slate-800 dark:text-white flex items-center gap-1.5">
                   <Settings2 className="h-4 w-4 text-violet-500" />
                   Dados Fixos da Igreja
                 </h3>
                 <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                  Salvo automaticamente neste navegador para você não precisar preencher todo mês.
+                  Salvo automaticamente neste navegador. Exporte para usar em outro celular ou PC.
                 </p>
               </div>
-              {savedNotice && (
-                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2.5 py-1 text-[11px] font-semibold text-emerald-500">
-                  <Check className="h-3 w-3" /> Salvo
+              {profileNotice && (
+                <span
+                  className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                    profileNotice.type === 'ok'
+                      ? 'bg-emerald-500/15 text-emerald-500'
+                      : 'bg-rose-500/15 text-rose-500'
+                  }`}
+                >
+                  <Check className="h-3 w-3" /> {profileNotice.text}
                 </span>
               )}
+            </div>
+
+            {/* Export / Import Backup Bar */}
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={handleExportProfile}
+                className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 transition hover:border-violet-400 hover:text-violet-600 dark:hover:text-violet-300"
+              >
+                <Download className="h-3.5 w-3.5" />
+                Exportar Perfil
+              </button>
+              <label className="inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-violet-300 dark:border-violet-500/40 bg-violet-50 dark:bg-violet-500/10 px-3 py-2 text-xs font-semibold text-violet-700 dark:text-violet-300 transition hover:bg-violet-100 dark:hover:bg-violet-500/20">
+                <Upload className="h-3.5 w-3.5" />
+                Importar Perfil
+                <input
+                  type="file"
+                  accept="application/json,.json"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) handleImportProfile(f);
+                    e.target.value = '';
+                  }}
+                />
+              </label>
             </div>
 
             <div className="space-y-3">
