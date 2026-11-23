@@ -60,3 +60,79 @@ export function canvasToBlob(
     );
   });
 }
+
+export type WhatsAppShareResult = 'shared' | 'copied-and-opened' | 'downloaded-and-opened' | 'cancelled';
+
+/**
+ * Shares an image + caption to WhatsApp:
+ * - On mobile / browsers supporting Web Share with files: opens native share sheet with image attached.
+ * - On desktop: copies PNG to clipboard (or downloads as fallback) and opens WhatsApp Web with the caption.
+ */
+export async function shareImageToWhatsApp(
+  blob: Blob,
+  filename: string,
+  caption: string
+): Promise<WhatsAppShareResult> {
+  const file = new File([blob], filename, { type: blob.type || 'image/png' });
+
+  // 1. Mobile / native Web Share API with file attachment
+  if (
+    typeof navigator !== 'undefined' &&
+    typeof navigator.share === 'function' &&
+    typeof navigator.canShare === 'function' &&
+    navigator.canShare({ files: [file] })
+  ) {
+    try {
+      await navigator.share({
+        files: [file],
+        title: filename,
+        text: caption,
+      });
+      return 'shared';
+    } catch (err) {
+      if ((err as Error)?.name === 'AbortError') return 'cancelled';
+      // Fall through to desktop flow if native share fails
+    }
+  }
+
+  // 2. Desktop flow: try copying PNG to clipboard so user can just Ctrl+V in WhatsApp Web
+  let copied = false;
+  try {
+    if (
+      typeof navigator !== 'undefined' &&
+      navigator.clipboard &&
+      typeof ClipboardItem !== 'undefined'
+    ) {
+      // ClipboardItem requires image/png in most browsers
+      const pngBlob = blob.type === 'image/png' ? blob : await convertBlobToPng(blob);
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngBlob })]);
+      copied = true;
+    }
+  } catch {
+    copied = false;
+  }
+
+  if (!copied) {
+    downloadBlob(blob, filename);
+  }
+
+  const waUrl = `https://wa.me/?text=${encodeURIComponent(caption)}`;
+  window.open(waUrl, '_blank', 'noopener,noreferrer');
+
+  return copied ? 'copied-and-opened' : 'downloaded-and-opened';
+}
+
+async function convertBlobToPng(blob: Blob): Promise<Blob> {
+  const url = URL.createObjectURL(blob);
+  try {
+    const img = await loadImage(url);
+    const c = document.createElement('canvas');
+    c.width = img.naturalWidth;
+    c.height = img.naturalHeight;
+    const ctx = c.getContext('2d');
+    ctx?.drawImage(img, 0, 0);
+    return await canvasToBlob(c, 'image/png');
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}

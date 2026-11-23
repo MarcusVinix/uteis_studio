@@ -19,6 +19,7 @@ export type PosterElementId =
   | 'presidentPastors'
   | 'circleLeader'
   | 'preacher'
+  | 'singer'
   | 'labels'
   | 'verse'
   | 'datePill'
@@ -62,6 +63,11 @@ export interface ChurchPostState {
   preacherPhotoUrl: string | null;
   preacherZoom: number;
   preacherOffsetY: number;
+  showSinger: boolean;
+  singerRole: string;
+  singerName: string;
+  singerPhotoUrl: string | null;
+  singerZoom: number;
   showLogo: boolean;
   logoScale: number;
   showLocalPastors: boolean;
@@ -562,8 +568,9 @@ export async function renderChurchPost(
   }
 
   // Load portraits
-  const [preacherImg, localImg, presidentImg, circleImg] = await Promise.all([
+  const [preacherImg, singerImg, localImg, presidentImg, circleImg] = await Promise.all([
     getCachedImage(state.preacherPhotoUrl),
+    state.showSinger ? getCachedImage(state.singerPhotoUrl) : Promise.resolve(null),
     state.showLocalPastors ? getCachedImage(profile.localPastorsPhoto) : Promise.resolve(null),
     state.showPresidentPastors
       ? getCachedImage(profile.presidentPastorsPhoto)
@@ -571,10 +578,10 @@ export async function renderChurchPost(
     state.showCircleLeader ? getCachedImage(profile.circleLeaderPhoto) : Promise.resolve(null),
   ]);
 
-  const hasAnyPortrait = Boolean(preacherImg || localImg || presidentImg || circleImg);
-  const isFourPersonLayout = Boolean(circleImg && preacherImg);
+  const hasAnyPortrait = Boolean(preacherImg || singerImg || localImg || presidentImg || circleImg);
 
-  // Structural layout coordinates based on LayoutMode!
+  // Structural layout coordinates based on LayoutMode
+  const isSideLeft = layoutMode === 'side-left';
   const portraitBaseY =
     layoutMode === 'hero-overlap'
       ? 800 * scaleY
@@ -582,7 +589,11 @@ export async function renderChurchPost(
         ? 955 * scaleY
         : layoutMode === 'minimal-focus'
           ? 1120 * scaleY
-          : 935 * scaleY;
+          : layoutMode === 'side-left'
+            ? 920 * scaleY
+            : layoutMode === 'banner-top'
+              ? 945 * scaleY
+              : 935 * scaleY;
 
   const titleBlockY =
     layoutMode === 'hero-overlap'
@@ -591,9 +602,15 @@ export async function renderChurchPost(
         ? 420 * scaleY
         : layoutMode === 'minimal-focus'
           ? 455 * scaleY
-          : hasAnyPortrait
-            ? 270 * scaleY
-            : 440 * scaleY;
+          : layoutMode === 'side-left'
+            ? 380 * scaleY
+            : layoutMode === 'banner-top'
+              ? 225 * scaleY
+              : layoutMode === 'spotlight-card'
+                ? 285 * scaleY
+                : hasAnyPortrait
+                  ? 270 * scaleY
+                  : 440 * scaleY;
 
   const labelY =
     layoutMode === 'hero-overlap'
@@ -609,87 +626,182 @@ export async function renderChurchPost(
         ? 1055 * scaleY
         : layoutMode === 'minimal-focus'
           ? 875 * scaleY
-          : state.verse.trim()
-            ? 1152 * scaleY
-            : 1098 * scaleY;
+          : layoutMode === 'side-left'
+            ? 640 * scaleY
+            : state.verse.trim()
+              ? 1152 * scaleY
+              : 1098 * scaleY;
 
   const verseBaseY =
     layoutMode === 'minimal-focus'
       ? 685 * scaleY
       : layoutMode === 'hero-overlap'
         ? 1150 * scaleY
-        : 1068 * scaleY;
+        : layoutMode === 'side-left'
+          ? 740 * scaleY
+          : 1068 * scaleY;
 
-  // 5. Portraits Section
-  const portraitScaleMod = layoutMode === 'minimal-focus' ? 0.72 : 1;
+  // Decorative top banner / spotlight card background for banner-top & spotlight-card layouts
+  if (layoutMode === 'banner-top') {
+    ctx.save();
+    const bannerH = 265 * scaleY;
+    ctx.fillStyle = isLightBg ? 'rgba(255,255,255,0.68)' : 'rgba(15,23,42,0.62)';
+    ctx.fillRect(0, 108 * scaleY, W, bannerH);
+    ctx.fillStyle = accent;
+    ctx.fillRect(0, 108 * scaleY + bannerH - 4, W, 4);
+    ctx.restore();
+  } else if (layoutMode === 'spotlight-card') {
+    ctx.save();
+    drawRoundedRect(ctx, 64, 148 * scaleY, W - 128, 305 * scaleY, 28);
+    ctx.fillStyle = isLightBg ? 'rgba(255,255,255,0.78)' : 'rgba(15,23,42,0.68)';
+    ctx.fill();
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = accent;
+    ctx.stroke();
+    ctx.restore();
+  }
 
+  // 5. Portraits Section — dynamic balanced layout for 1 to 5 active portraits
+  const portraitScaleMod =
+    layoutMode === 'minimal-focus' ? 0.72 : layoutMode === 'banner-top' ? 1.08 : 1;
+
+  interface PortraitSlot {
+    id: PosterElementId;
+    label: string;
+    img: HTMLImageElement;
+    zoom: number;
+    offsetY: number;
+    isHero: boolean;
+  }
+
+  const activeSlots: PortraitSlot[] = [];
   if (localImg) {
-    const tr = getTr(transforms, 'localPastors');
-    const z = (state.localPastorsZoom / 100) * tr.scale * portraitScaleMod;
-    const baseX = isFourPersonLayout ? W * 0.14 : layoutMode === 'minimal-focus' ? W * 0.16 : W * 0.19;
-    const rect = drawPortraitWithBottomFade(
-      ctx,
-      localImg,
-      baseX + tr.dx,
-      portraitBaseY + tr.dy,
-      (isFourPersonLayout ? 340 : 370) * scaleY * z,
-      (isFourPersonLayout ? 275 : 330) * z
-    );
-    pushBox('localPastors', 'Prs. Locais', rect.x, rect.y, rect.w, rect.h);
+    activeSlots.push({
+      id: 'localPastors',
+      label: 'Prs. Locais',
+      img: localImg,
+      zoom: state.localPastorsZoom / 100,
+      offsetY: 0,
+      isHero: false,
+    });
   }
-
-  if (presidentImg) {
-    const tr = getTr(transforms, 'presidentPastors');
-    const z = (state.presidentPastorsZoom / 100) * tr.scale * portraitScaleMod;
-    const baseX = isFourPersonLayout ? W * 0.86 : layoutMode === 'minimal-focus' ? W * 0.84 : W * 0.81;
-    const rect = drawPortraitWithBottomFade(
-      ctx,
-      presidentImg,
-      baseX + tr.dx,
-      portraitBaseY + tr.dy,
-      (isFourPersonLayout ? 340 : 370) * scaleY * z,
-      (isFourPersonLayout ? 275 : 330) * z
-    );
-    pushBox('presidentPastors', 'Prs. Presidentes', rect.x, rect.y, rect.w, rect.h);
-  }
-
   if (circleImg) {
-    const tr = getTr(transforms, 'circleLeader');
-    const z = (state.circleLeaderZoom / 100) * tr.scale * portraitScaleMod;
-    const baseX = preacherImg ? W * 0.38 : W * 0.5;
-    const rect = drawPortraitWithBottomFade(
-      ctx,
-      circleImg,
-      baseX + tr.dx,
-      portraitBaseY + tr.dy,
-      365 * scaleY * z,
-      280 * z
-    );
-    pushBox('circleLeader', 'Dirigente Círc. Oração', rect.x, rect.y, rect.w, rect.h);
+    activeSlots.push({
+      id: 'circleLeader',
+      label: 'Dirigente Círc. Oração',
+      img: circleImg,
+      zoom: state.circleLeaderZoom / 100,
+      offsetY: 0,
+      isHero: false,
+    });
+  }
+  if (preacherImg) {
+    activeSlots.push({
+      id: 'preacher',
+      label: 'Foto do Pregador',
+      img: preacherImg,
+      zoom: state.preacherZoom / 100,
+      offsetY: state.preacherOffsetY * scaleY,
+      isHero: true,
+    });
+  }
+  if (singerImg) {
+    activeSlots.push({
+      id: 'singer',
+      label: 'Foto do Cantor / Louvor',
+      img: singerImg,
+      zoom: state.singerZoom / 100,
+      offsetY: 0,
+      isHero: true,
+    });
+  }
+  if (presidentImg) {
+    activeSlots.push({
+      id: 'presidentPastors',
+      label: 'Prs. Presidentes',
+      img: presidentImg,
+      zoom: state.presidentPastorsZoom / 100,
+      offsetY: 0,
+      isHero: false,
+    });
   }
 
-  if (preacherImg) {
-    const tr = getTr(transforms, 'preacher');
-    const zoomFactor =
-      (state.preacherZoom / 100) * tr.scale * (layoutMode === 'hero-overlap' ? 1.12 : 1);
-    const centerX = (circleImg ? W * 0.62 : W * 0.5) + tr.dx;
+  const slotCount = activeSlots.length;
+  // Draw non-hero portraits first, then hero portraits (preacher/singer) on top for depth!
+  const orderedWithX = activeSlots.map((slot, idx) => {
+    let baseX = W * 0.5;
+    if (isSideLeft && slotCount === 1) {
+      baseX = W * 0.72;
+    } else if (isSideLeft && slotCount === 2) {
+      baseX = idx === 0 ? W * 0.58 : W * 0.82;
+    } else if (slotCount === 2) {
+      baseX = idx === 0 ? W * 0.32 : W * 0.68;
+    } else if (slotCount === 3) {
+      baseX = [W * 0.19, W * 0.5, W * 0.81][idx];
+    } else if (slotCount === 4) {
+      baseX = [W * 0.14, W * 0.38, W * 0.62, W * 0.86][idx];
+    } else if (slotCount >= 5) {
+      baseX = [W * 0.12, W * 0.31, W * 0.5, W * 0.69, W * 0.88][idx];
+    }
+    return { slot, baseX };
+  });
+
+  const drawOrder = [
+    ...orderedWithX.filter((o) => !o.slot.isHero),
+    ...orderedWithX.filter((o) => o.slot.isHero),
+  ];
+
+  for (const { slot, baseX } of drawOrder) {
+    const tr = getTr(transforms, slot.id);
+    const heroBoost = slot.isHero && layoutMode === 'hero-overlap' ? 1.12 : 1;
+    const z = slot.zoom * tr.scale * portraitScaleMod * heroBoost;
+
+    const baseH =
+      slotCount >= 5
+        ? slot.isHero
+          ? 380
+          : 310
+        : slotCount === 4
+          ? slot.isHero
+            ? 410
+            : 340
+          : slot.isHero
+            ? 475
+            : 370;
+
+    const baseW =
+      slotCount >= 5
+        ? slot.isHero
+          ? 290
+          : 235
+        : slotCount === 4
+          ? slot.isHero
+            ? 340
+            : 275
+          : slot.isHero
+            ? 450
+            : 330;
+
     const rect = drawPortraitWithBottomFade(
       ctx,
-      preacherImg,
-      centerX,
-      portraitBaseY + state.preacherOffsetY * scaleY + tr.dy,
-      (circleImg ? 420 : 475) * scaleY * zoomFactor,
-      (circleImg ? 350 : 450) * zoomFactor
+      slot.img,
+      baseX + tr.dx,
+      portraitBaseY + slot.offsetY + tr.dy,
+      baseH * scaleY * z,
+      baseW * z
     );
-    pushBox('preacher', 'Foto do Pregador', rect.x, rect.y, rect.w, rect.h);
+    pushBox(slot.id, slot.label, rect.x, rect.y, rect.w, rect.h);
   }
 
   // 6. Main Typography Block (drawn AFTER portraits so hero-overlap sits dramatically in front!)
   if (state.eyebrow.trim() || state.title.trim() || state.subtitle.trim()) {
     const tr = getTr(transforms, 'titleBlock');
-    const cx = W / 2 + tr.dx;
+    const cx = (isSideLeft ? W * 0.31 : W / 2) + tr.dx;
     const titleY = titleBlockY + 24 * scaleY + tr.dy;
-    const s = tr.scale * (layoutMode === 'minimal-focus' ? 1.12 : 1);
+    const s =
+      tr.scale *
+      (layoutMode === 'minimal-focus' ? 1.12 : isSideLeft ? 0.78 : layoutMode === 'banner-top' ? 0.84 : 1);
+    const maxTitleW = isSideLeft ? W * 0.54 : W - 90;
     const titleHalfH =
       (template.titleStyle === 'fire-gradient' || template.titleStyle === 'impact'
         ? 84
@@ -703,7 +815,7 @@ export async function renderChurchPost(
 
     let topY = titleY - titleHalfH;
     let botY = titleY + titleHalfH;
-    let maxW = 360 * s;
+    let maxW = 320 * s;
 
     if (state.eyebrow.trim()) {
       ctx.fillStyle = isLightBg ? accent : '#f8fafc';
@@ -715,8 +827,8 @@ export async function renderChurchPost(
         : `800 ${Math.round(30 * s)}px Montserrat, Inter, sans-serif`;
       const eyebrowGap = (isScriptEyebrow ? 34 : 28) * s;
       const eyY = titleY - titleHalfH - eyebrowGap;
-      ctx.fillText(state.eyebrow, cx, eyY);
-      maxW = Math.max(maxW, Math.min(ctx.measureText(state.eyebrow).width + 40, W - 80));
+      ctx.fillText(state.eyebrow, cx, eyY, maxTitleW);
+      maxW = Math.max(maxW, Math.min(ctx.measureText(state.eyebrow).width + 40, maxTitleW));
       topY = eyY - 26 * s;
     }
 
@@ -727,16 +839,16 @@ export async function renderChurchPost(
         ctx.fillStyle = accent;
         ctx.shadowColor = 'rgba(255,255,255,0.85)';
         ctx.shadowBlur = 12;
-        ctx.fillText(mainTitle, cx, titleY, W - 100);
+        ctx.fillText(mainTitle, cx, titleY, maxTitleW);
       } else if (template.titleStyle === 'serif') {
         ctx.font = `700 ${Math.round(128 * s)}px "Playfair Display", Georgia, serif`;
         ctx.fillStyle = textColor;
         ctx.shadowColor = isLightBg ? 'rgba(255,255,255,0.7)' : 'rgba(0,0,0,0.7)';
         ctx.shadowBlur = 18;
-        ctx.fillText(mainTitle, cx, titleY, W - 100);
+        ctx.fillText(mainTitle, cx, titleY, maxTitleW);
       } else if (template.titleStyle === 'neon-pill') {
         ctx.font = `900 ${Math.round(104 * s)}px Anton, Montserrat, sans-serif`;
-        const tw = Math.min(ctx.measureText(mainTitle).width + 76 * s, W - 90);
+        const tw = Math.min(ctx.measureText(mainTitle).width + 76 * s, maxTitleW);
         const th = 132 * s;
         ctx.save();
         ctx.shadowColor = 'rgba(0,0,0,0.45)';
@@ -747,7 +859,7 @@ export async function renderChurchPost(
         ctx.restore();
         ctx.fillStyle = '#0f172a';
         ctx.shadowBlur = 0;
-        ctx.fillText(mainTitle, cx, titleY + 4 * s, W - 130);
+        ctx.fillText(mainTitle, cx, titleY + 4 * s, tw - 40);
         maxW = Math.max(maxW, tw);
       } else if (template.titleStyle === 'fire-gradient') {
         ctx.font = `400 ${Math.round(148 * s)}px Anton, Montserrat, sans-serif`;
@@ -763,15 +875,15 @@ export async function renderChurchPost(
         ctx.fillStyle = grad;
         ctx.shadowColor = 'rgba(0,0,0,0.85)';
         ctx.shadowBlur = 24;
-        ctx.fillText(mainTitle, cx, titleY, W - 90);
+        ctx.fillText(mainTitle, cx, titleY, maxTitleW);
       } else {
         ctx.font = `400 ${Math.round(142 * s)}px Anton, Montserrat, sans-serif`;
         ctx.fillStyle = accent;
         ctx.shadowColor = isLightBg ? 'rgba(255,255,255,0.65)' : 'rgba(0,0,0,0.85)';
         ctx.shadowBlur = 22;
-        ctx.fillText(mainTitle, cx, titleY, W - 90);
+        ctx.fillText(mainTitle, cx, titleY, maxTitleW);
       }
-      maxW = Math.max(maxW, Math.min(ctx.measureText(mainTitle).width + 48, W - 80));
+      maxW = Math.max(maxW, Math.min(ctx.measureText(mainTitle).width + 48, maxTitleW));
     }
 
     if (state.subtitle.trim()) {
@@ -781,13 +893,13 @@ export async function renderChurchPost(
         ctx.font = `400 ${Math.round(72 * s)}px "Great Vibes", cursive`;
         ctx.fillStyle = template.secondaryColor;
         const subY = titleY + titleHalfH + 34 * s;
-        ctx.fillText(state.subtitle, cx, subY, W - 120);
+        ctx.fillText(state.subtitle, cx, subY, maxTitleW);
         botY = subY + 34 * s;
       } else {
         ctx.font = `700 ${Math.round(28 * s)}px Montserrat, Inter, sans-serif`;
         ctx.fillStyle = textColor;
         const subY = titleY + titleHalfH + 30 * s;
-        ctx.fillText(state.subtitle, cx, subY, W - 140);
+        ctx.fillText(state.subtitle, cx, subY, maxTitleW);
         botY = subY + 22 * s;
       }
     }
@@ -796,7 +908,7 @@ export async function renderChurchPost(
     pushBox('titleBlock', 'Título do Culto', cx - maxW / 2, topY, maxW, botY - topY);
   }
 
-  // 7. Preacher & Pastors Labels Band (4 styles: glass, minimal, solid, pill)
+  // 7. Preacher, Singer & Pastors Labels Band (supports 1 to 5 cards!)
   const labelCards: { title: string; body: string }[] = [];
 
   if (state.showLocalPastors && profile.localPastorsLabel.trim()) {
@@ -819,6 +931,12 @@ export async function renderChurchPost(
       body: state.preacherName.trim(),
     });
   }
+  if (state.showSinger && state.singerName.trim()) {
+    labelCards.push({
+      title: state.singerRole.trim() || 'LOUVOR',
+      body: state.singerName.trim(),
+    });
+  }
   if (state.showPresidentPastors && profile.presidentPastorsLabel.trim()) {
     const parts = profile.presidentPastorsLabel.split('\n');
     labelCards.push({
@@ -839,12 +957,14 @@ export async function renderChurchPost(
     let maxX = -Infinity;
     const count = labelCards.length;
     const cardW = Math.round(
-      (count === 1 ? 420 : count === 2 ? 380 : count === 3 ? 300 : 240) * s
+      (count === 1 ? 420 : count === 2 ? 380 : count === 3 ? 300 : count === 4 ? 240 : 196) * s
     );
     const cardH = Math.round(88 * s);
-    const gap = Math.round((count === 4 ? 14 : 24) * s);
+    const gap = Math.round((count >= 5 ? 10 : count === 4 ? 14 : 24) * s);
     const totalW = count * cardW + (count - 1) * gap;
     const startX = W / 2 - totalW / 2 + cardW / 2;
+    const titleFontPx = count >= 5 ? 13 : count === 4 ? 15 : 18;
+    const bodyFontPx = count >= 5 ? 14 : count === 4 ? 16 : 19;
 
     labelCards.forEach((card, idx) => {
       const cx = startX + idx * (cardW + gap) + tr.dx;
@@ -852,7 +972,6 @@ export async function renderChurchPost(
       maxX = Math.max(maxX, cx + cardW / 2);
 
       if (cardStyle === 'minimal') {
-        // Clean text with subtle vertical accent divider between items (Canva editorial style!)
         if (idx > 0) {
           ctx.save();
           ctx.strokeStyle = accent;
@@ -868,11 +987,11 @@ export async function renderChurchPost(
         ctx.shadowColor = isLightBg ? 'rgba(255,255,255,0.8)' : 'rgba(0,0,0,0.85)';
         ctx.shadowBlur = 8;
         ctx.fillStyle = accent;
-        ctx.font = `800 ${Math.round((count === 4 ? 15 : 18) * s)}px Montserrat, Inter, sans-serif`;
-        ctx.fillText(card.title.toUpperCase(), cx, ly - 17 * s, cardW - 14);
+        ctx.font = `800 ${Math.round(titleFontPx * s)}px Montserrat, Inter, sans-serif`;
+        ctx.fillText(card.title.toUpperCase(), cx, ly - 17 * s, cardW - 12);
         ctx.fillStyle = textColor;
-        ctx.font = `700 ${Math.round((count === 4 ? 16 : 19) * s)}px Montserrat, Inter, sans-serif`;
-        ctx.fillText(card.body, cx, ly + 15 * s, cardW - 14);
+        ctx.font = `700 ${Math.round(bodyFontPx * s)}px Montserrat, Inter, sans-serif`;
+        ctx.fillText(card.body, cx, ly + 15 * s, cardW - 12);
         ctx.shadowBlur = 0;
       } else {
         const radius = cardStyle === 'pill' ? cardH / 2 : 16 * s;
@@ -885,7 +1004,6 @@ export async function renderChurchPost(
           ctx.strokeStyle = accent;
           ctx.stroke();
         } else {
-          // glass or pill
           ctx.fillStyle = isLightBg ? 'rgba(255,255,255,0.86)' : 'rgba(15,23,42,0.72)';
           ctx.fill();
           ctx.lineWidth = 1.5;
@@ -895,8 +1013,8 @@ export async function renderChurchPost(
 
         const solidLight = cardStyle === 'solid' && isLightBg;
         ctx.fillStyle = solidLight ? (isBrightColor(accent) ? '#0f172a' : '#fef3c7') : accent;
-        ctx.font = `800 ${Math.round((count === 4 ? 15 : 18) * s)}px Montserrat, Inter, sans-serif`;
-        ctx.fillText(card.title.toUpperCase(), cx, ly - 18 * s, cardW - 22);
+        ctx.font = `800 ${Math.round(titleFontPx * s)}px Montserrat, Inter, sans-serif`;
+        ctx.fillText(card.title.toUpperCase(), cx, ly - 18 * s, cardW - 18);
 
         ctx.fillStyle = solidLight
           ? isBrightColor(accent)
@@ -905,8 +1023,8 @@ export async function renderChurchPost(
           : isLightBg
             ? '#334155'
             : '#f8fafc';
-        ctx.font = `700 ${Math.round((count === 4 ? 16 : 19) * s)}px Montserrat, Inter, sans-serif`;
-        ctx.fillText(card.body, cx, ly + 14 * s, cardW - 22);
+        ctx.font = `700 ${Math.round(bodyFontPx * s)}px Montserrat, Inter, sans-serif`;
+        ctx.fillText(card.body, cx, ly + 14 * s, cardW - 18);
       }
     });
 
@@ -917,10 +1035,11 @@ export async function renderChurchPost(
   // 8. Verse
   if (state.verse.trim()) {
     const tr = getTr(transforms, 'verse');
-    const cx = W / 2 + tr.dx;
+    const cx = (isSideLeft ? W * 0.31 : W / 2) + tr.dx;
     const cy = verseBaseY + tr.dy;
     const fontSize = Math.round((layoutMode === 'minimal-focus' ? 30 : 26) * tr.scale);
     const lineH = Math.round(fontSize * 1.28);
+    const maxVerseW = isSideLeft ? W * 0.52 : W - 160;
     ctx.save();
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -940,9 +1059,9 @@ export async function renderChurchPost(
     ctx.font = `italic 600 ${fontSize}px "Playfair Display", Georgia, serif`;
     ctx.shadowColor = isLightBg ? 'rgba(255,255,255,0.7)' : 'rgba(0,0,0,0.75)';
     ctx.shadowBlur = 8;
-    const { lineCount, maxLineW } = drawMultilineCentered(ctx, state.verse, cx, cy, lineH, W - 160);
+    const { lineCount, maxLineW } = drawMultilineCentered(ctx, state.verse, cx, cy, lineH, maxVerseW);
     ctx.restore();
-    const bw = Math.min(maxLineW + 32, W - 120);
+    const bw = Math.min(maxLineW + 32, maxVerseW);
     const bh = lineCount * lineH + 16;
     pushBox('verse', 'Versículo / Tema', cx - bw / 2, cy - lineH / 2 - 4, bw, bh);
   }
@@ -950,18 +1069,19 @@ export async function renderChurchPost(
   // 9. Date & Time Banner (4 styles: pill, outline, ribbon, stamp)
   if (state.dateText.trim()) {
     const tr = getTr(transforms, 'datePill');
-    const cx = W / 2 + tr.dx;
+    const cx = (isSideLeft ? W * 0.31 : W / 2) + tr.dx;
     const dateY = dateBaseY + tr.dy;
-    const s = tr.scale;
+    const s = tr.scale * (isSideLeft ? 0.85 : 1);
     const textUpper = state.dateText.toUpperCase();
+    const maxDateW = isSideLeft ? W * 0.54 : W - 80;
 
     ctx.save();
     ctx.font = `800 ${Math.round(33 * s)}px Montserrat, Inter, sans-serif`;
     const textW = ctx.measureText(textUpper).width;
     const pillW =
       dateStyle === 'ribbon'
-        ? Math.min(W - 140, Math.max(textW + 140 * s, 560 * s))
-        : Math.min(Math.max(textW + 92 * s, 400 * s), W - 80);
+        ? Math.min(maxDateW, Math.max(textW + 140 * s, 480 * s))
+        : Math.min(Math.max(textW + 92 * s, 360 * s), maxDateW);
     const pillH = Math.round((dateStyle === 'stamp' ? 92 : 74) * s);
 
     if (dateStyle === 'outline') {

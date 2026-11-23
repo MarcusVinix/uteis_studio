@@ -14,6 +14,9 @@ import {
   Move,
   RotateCcw,
   AlignCenterHorizontal,
+  Music2,
+  Plus,
+  Share2,
 } from 'lucide-react';
 import {
   CHURCH_TEMPLATES,
@@ -41,7 +44,7 @@ import {
   type PosterElementId,
 } from '../utils/churchPostRenderer';
 import { removeImageBackground } from '../utils/aiBackgroundRemover';
-import { canvasToBlob, downloadBlob } from '../utils/imageHelpers';
+import { canvasToBlob, downloadBlob, shareImageToWhatsApp } from '../utils/imageHelpers';
 
 interface ChurchPostGeneratorProps {
   initialPreacherFile?: File | null;
@@ -138,6 +141,14 @@ export const ChurchPostGenerator: React.FC<ChurchPostGeneratorProps> = ({
   const [preacherZoom, setPreacherZoom] = useState(100);
   const [preacherOffsetY, setPreacherOffsetY] = useState(0);
 
+  // Optional Singer / Worship Guest
+  const [showSinger, setShowSinger] = useState(false);
+  const [singerRole, setSingerRole] = useState('LOUVOR');
+  const [singerName, setSingerName] = useState('');
+  const [singerPhotoUrl, setSingerPhotoUrl] = useState<string | null>(null);
+  const [singerFile, setSingerFile] = useState<File | null>(null);
+  const [singerZoom, setSingerZoom] = useState(100);
+
   const [showLogo, setShowLogo] = useState(true);
   const [logoScale, setLogoScale] = useState(100);
   const [showLocalPastors, setShowLocalPastors] = useState(true);
@@ -164,6 +175,7 @@ export const ChurchPostGenerator: React.FC<ChurchPostGeneratorProps> = ({
   // Busy states for built-in AI bg removal
   const [busySlot, setBusySlot] = useState<string | null>(null);
   const [exportFormat, setExportFormat] = useState<'image/png' | 'image/jpeg'>('image/png');
+  const [shareToast, setShareToast] = useState<string | null>(null);
   const [profileNotice, setProfileNotice] = useState<{ type: 'ok' | 'err'; text: string } | null>(
     null
   );
@@ -255,6 +267,11 @@ export const ChurchPostGenerator: React.FC<ChurchPostGeneratorProps> = ({
         preacherPhotoUrl,
         preacherZoom,
         preacherOffsetY,
+        showSinger,
+        singerRole,
+        singerName,
+        singerPhotoUrl,
+        singerZoom,
         showLogo,
         logoScale,
         showLocalPastors,
@@ -292,6 +309,11 @@ export const ChurchPostGenerator: React.FC<ChurchPostGeneratorProps> = ({
     preacherPhotoUrl,
     preacherZoom,
     preacherOffsetY,
+    showSinger,
+    singerRole,
+    singerName,
+    singerPhotoUrl,
+    singerZoom,
     showLogo,
     logoScale,
     showLocalPastors,
@@ -455,6 +477,39 @@ export const ChurchPostGenerator: React.FC<ChurchPostGeneratorProps> = ({
     downloadBlob(blob, `${slug}-${formatId}.${ext}`);
   };
 
+  const handleShareWhatsApp = async () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const blob = await canvasToBlob(canvas, exportFormat, 0.95);
+    const ext = exportFormat === 'image/jpeg' ? 'jpg' : 'png';
+    const slug = (title || 'post-igreja')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]+/g, '-');
+
+    const lines = [
+      `✨ *${[eyebrow, title].filter(Boolean).join(' ')}*`,
+      subtitle ? `_${subtitle}_` : '',
+      dateText ? `📅 *${dateText}*` : '',
+      preacherName ? `🎤 *${preacherRole || 'Pregador'}:* ${preacherName}` : '',
+      showSinger && singerName ? `🎵 *${singerRole || 'Louvor'}:* ${singerName}` : '',
+      verse ? `📖 ${verse}` : '',
+      showFoodBadge ? `🧺 ${foodBadgeText.replace('\n', ' ')}` : '',
+      profile.churchName ? `⛪ ${profile.churchName}` : '',
+      profile.address ? `📍 ${profile.address}` : '',
+    ].filter(Boolean);
+
+    const result = await shareImageToWhatsApp(blob, `${slug}-${formatId}.${ext}`, lines.join('\n'));
+    if (result === 'copied-and-opened') {
+      setShareToast('Imagem copiada! Cole (Ctrl+V) no WhatsApp Web.');
+      setTimeout(() => setShareToast(null), 5000);
+    } else if (result === 'downloaded-and-opened') {
+      setShareToast('Imagem baixada e WhatsApp aberto — anexe a foto na conversa.');
+      setTimeout(() => setShareToast(null), 5000);
+    }
+  };
+
   const handlePreacherUpload = (file: File) => {
     setPreacherFile(file);
     const url = URL.createObjectURL(file);
@@ -470,6 +525,26 @@ export const ChurchPostGenerator: React.FC<ChurchPostGeneratorProps> = ({
     try {
       const dataUrl = await removeBgFromFileToDataUrl(preacherFile);
       setPreacherPhotoUrl(dataUrl);
+    } finally {
+      setBusySlot(null);
+    }
+  };
+
+  const handleSingerUpload = (file: File) => {
+    setSingerFile(file);
+    const url = URL.createObjectURL(file);
+    setSingerPhotoUrl((prev) => {
+      if (prev && prev.startsWith('blob:')) URL.revokeObjectURL(prev);
+      return url;
+    });
+  };
+
+  const handleRemoveSingerBg = async () => {
+    if (!singerFile) return;
+    setBusySlot('singer');
+    try {
+      const dataUrl = await removeBgFromFileToDataUrl(singerFile);
+      setSingerPhotoUrl(dataUrl);
     } finally {
       setBusySlot(null);
     }
@@ -551,13 +626,27 @@ export const ChurchPostGenerator: React.FC<ChurchPostGeneratorProps> = ({
             </select>
             <button
               onClick={handleDownload}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 px-4 py-2 text-xs font-semibold text-white shadow-sm hover:from-violet-700 hover:to-indigo-700"
+              className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm hover:from-violet-700 hover:to-indigo-700"
             >
               <Download className="h-3.5 w-3.5" />
               Baixar Post
             </button>
+            <button
+              onClick={handleShareWhatsApp}
+              title="Compartilhar imagem e convite no WhatsApp"
+              className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-500"
+            >
+              <Share2 className="h-3.5 w-3.5" />
+              WhatsApp
+            </button>
           </div>
         </div>
+
+        {shareToast && (
+          <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2.5 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+            {shareToast}
+          </div>
+        )}
 
         <div
           onClick={() => setSelectedId(null)}
@@ -900,8 +989,8 @@ export const ChurchPostGenerator: React.FC<ChurchPostGeneratorProps> = ({
                     Zoom ({preacherZoom}%)
                     <input
                       type="range"
-                      min={70}
-                      max={145}
+                      min={60}
+                      max={160}
                       value={preacherZoom}
                       onChange={(e) => setPreacherZoom(Number(e.target.value))}
                       className="mt-1 w-full accent-violet-600"
@@ -920,6 +1009,114 @@ export const ChurchPostGenerator: React.FC<ChurchPostGeneratorProps> = ({
                   </label>
                 </div>
               )}
+
+              {/* Optional Singer / Worship Guest */}
+              <div className="pt-2">
+                {!showSinger ? (
+                  <button
+                    onClick={() => setShowSinger(true)}
+                    className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-violet-400/70 dark:border-violet-500/40 bg-violet-50/50 dark:bg-violet-500/5 px-3 py-2 text-xs font-semibold text-violet-700 dark:text-violet-300 transition hover:bg-violet-100/70 dark:hover:bg-violet-500/15"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    <Music2 className="h-3.5 w-3.5" />
+                    Adicionar Cantor / Louvor (opcional)
+                  </button>
+                ) : (
+                  <div className="rounded-xl border border-violet-200 dark:border-violet-500/30 bg-violet-50/40 dark:bg-violet-950/20 p-3 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="inline-flex items-center gap-1.5 text-xs font-bold text-violet-800 dark:text-violet-300">
+                        <Music2 className="h-3.5 w-3.5" />
+                        Cantor / Louvor
+                      </span>
+                      <button
+                        onClick={() => {
+                          setShowSinger(false);
+                          setSingerPhotoUrl(null);
+                          setSingerFile(null);
+                        }}
+                        className="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-500 hover:underline"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                        Remover cantor
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <input
+                        value={singerRole}
+                        onChange={(e) => setSingerRole(e.target.value)}
+                        placeholder="Cargo (Ex: LOUVOR)"
+                        className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-1.5 text-xs text-slate-800 dark:text-white focus:border-violet-500 focus:outline-none"
+                      />
+                      <input
+                        value={singerName}
+                        onChange={(e) => setSingerName(e.target.value)}
+                        placeholder="Nome (Ex: Cantora Débora)"
+                        className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-800 dark:text-white focus:border-violet-500 focus:outline-none"
+                      />
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:border-violet-400">
+                        <Upload className="h-3.5 w-3.5" />
+                        {singerPhotoUrl ? 'Trocar foto' : 'Subir foto do cantor'}
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            if (f) handleSingerUpload(f);
+                            e.target.value = '';
+                          }}
+                        />
+                      </label>
+
+                      {singerFile && (
+                        <button
+                          disabled={busySlot === 'singer'}
+                          onClick={handleRemoveSingerBg}
+                          className="inline-flex items-center gap-1.5 rounded-xl bg-violet-600/15 border border-violet-500/30 px-3 py-1.5 text-xs font-semibold text-violet-700 dark:text-violet-300 hover:bg-violet-600/25 disabled:opacity-50"
+                        >
+                          {busySlot === 'singer' ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Sparkles className="h-3.5 w-3.5" />
+                          )}
+                          Remover fundo (IA)
+                        </button>
+                      )}
+
+                      {singerPhotoUrl && (
+                        <button
+                          onClick={() => {
+                            setSingerPhotoUrl(null);
+                            setSingerFile(null);
+                          }}
+                          className="rounded-xl border border-slate-200 dark:border-slate-700 p-1.5 text-slate-400 hover:text-rose-500"
+                          title="Remover foto do cantor"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
+
+                    {singerPhotoUrl && (
+                      <label className="block text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                        Tamanho da foto do cantor ({singerZoom}%)
+                        <input
+                          type="range"
+                          min={50}
+                          max={160}
+                          value={singerZoom}
+                          onChange={(e) => setSingerZoom(Number(e.target.value))}
+                          className="mt-1 w-full accent-violet-600"
+                        />
+                      </label>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
 
             <hr className="border-slate-100 dark:border-slate-800" />
